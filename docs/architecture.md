@@ -1,0 +1,417 @@
+# EdSynapse — System Architecture
+
+> **One-line:** An AI tutor that adapts to your learning preferences — grounding
+> every lesson in your own material and checking your understanding as it goes.
+
+This document is both the product map and the **architecture diagram** for the
+H0 hackathon submission (Open Innovation track). Every service is labelled with
+its provider so it's clear what runs on **Vercel** vs **AWS** vs **external**
+services.
+
+**Product shape:** B2C, three roles — **teacher**, **student** (class-enrolled
+*or* self-serve from their own uploads), and **admin** (platform operations) —
+launching as a free 1-month public beta. Live at
+<https://edsynapse-beta.vercel.app>.
+
+---
+
+## Provider legend
+
+| Prefix | Provider | Notes |
+|--------|----------|-------|
+| **Vercel –** | Vercel | Frontend hosting, serverless + edge compute, env/secrets, OIDC identity |
+| **AWS –** | Amazon Web Services | Aurora PostgreSQL + pgvector (relational data **and** vector store) |
+| **External –** | 3rd-party | OpenAI (chat + embeddings); Resend (transactional email); Google Forms (beta feedback) |
+
+> **Auth is first-party**, not an external service: custom email/password on
+> Aurora (`src/lib/auth.ts`) — scrypt-hashed passwords, opaque session tokens in
+> the `sessions` table, referenced by an httpOnly cookie. There is no Clerk.
+> Email **delivery** (verification + password reset) is the one outsourced piece,
+> via Resend's HTTPS API. The full auth model, flows, and Resend setup live in
+> [`auth.md`](auth.md).
+
+---
+
+## 1. System diagram
+
+```mermaid
+flowchart TB
+    subgraph client["Client — Browser / Mobile Web"]
+        U1["Teacher"]
+        U2["Student"]
+        U3["Admin"]
+    end
+
+    subgraph vercel["Vercel"]
+        CDN["Vercel — Edge Network (CDN + caching)"]
+        MW["Vercel — Edge Middleware (cookie-presence route gate)"]
+        APP["Vercel — Next.js App Router (React 19 UI)"]
+        API["Vercel — Serverless Functions, Node.js runtime (/api route handlers + SSE tutor stream)"]
+        OIDC["Vercel — Env vars + OIDC token (mints short-lived RDS IAM auth token)"]
+    end
+
+    subgraph aws["AWS"]
+        DB[("AWS — Aurora PostgreSQL 17 + pgvector 0.8 (relational data + content vectors)")]
+    end
+
+    subgraph ext["External Services"]
+        OPENAI["External — OpenAI API (gpt-5-mini chat + text-embedding-3-small)"]
+        RESEND["External — Resend API (verification + password-reset email)"]
+        GFORM["External — Google Forms (beta feedback)"]
+    end
+
+    U1 --> CDN
+    U2 --> CDN
+    U3 --> CDN
+    CDN --> MW
+    MW --> APP
+    APP --> API
+    APP -. "Feedback / Share Feedback link (new tab)" .-> GFORM
+    API -- "IAM auth (RDS token via OIDC), raw SQL over pg" --> DB
+    API --> OPENAI
+    API -. "verify / reset links (RESEND_API_KEY)" .-> RESEND
+    OIDC -. "AWS_ROLE_ARN + VERCEL_OIDC_TOKEN -> RDS signer" .-> API
+```
+
+**Notes on the real wiring:**
+
+- **No connection string / no password.** `src/lib/db.ts` assumes `AWS_ROLE_ARN`
+  using the request-scoped `VERCEL_OIDC_TOKEN` and mints a short-lived RDS auth
+  token per connection (`@aws-sdk/rds-signer`). There is no `DATABASE_URL`, no
+  RDS Proxy, and no S3 — uploaded files are parsed to text in-process
+  (`unpdf`/`mammoth`/`xlsx`) and stored in the `sources.content` column.
+- **Edge middleware does no DB work** — `src/middleware.ts` is a cookie-presence
+  gate that redirects unauthenticated users off `/teacher|/student|/admin` and
+  logged-in users off `/sign-in|/sign-up` (to `/`, since the edge can't read the
+  role). Real auth + role checks happen server-side in each route handler via
+  `requireUser(role?)`.
+- **Login is unified, not portal-split.** One `/sign-in` form; the account's real
+  `role` (DB) decides the destination — there is no "student vs teacher" toggle to
+  pick the wrong portal. Login is rate-limited (`src/lib/rateLimit.ts`) and
+  email verification + password reset run on Resend (see [`auth.md`](auth.md)).
+- **Response security headers** (HSTS, X-Frame-Options: DENY, nosniff,
+  Referrer-Policy, Permissions-Policy) are set for every route in
+  `next.config.ts`, complementing the httpOnly session cookie.
+- **The tutor stream is a Node.js serverless function** (`runtime = "nodejs"`,
+  `maxDuration = 60`), not an Edge function — it needs the `pg` and OpenAI SDKs.
+
+---
+
+## 2. The crown-jewel flow — grounded streaming tutor (RAG over SSE)
+
+This is the flow that proves the core claim — *the tutor grounds itself in your
+own material* — and best shows the backend connections for judging. Each tutor
+turn retrieves course material by vector similarity, replays recent conversation,
+and streams a grounded reply back over Server-Sent Events.
+
+```mermaid
+sequenceDiagram
+    participant S as Student (Browser)
+    participant F as Vercel Serverless Function (/api/student/tutor/stream)
+    participant DB as AWS Aurora + pgvector
+    participant AI as OpenAI
+
+    S->>F: POST message + topic + course_id + {modality, pace}
+    F->>AI: embed(topic + message)  [text-embedding-3-small]
+    AI-->>F: query embedding
+    F->>DB: content RAG — top-k source_chunks (cosine `<=>`, ivfflat)
+    DB-->>F: grounded chunks + citations
+    F->>DB: load recent turns (tutor_sessions.messages, last 8)
+    DB-->>F: conversation history
+    F-->>S: SSE `sources` event (citations)
+    F->>AI: stream chat (grounding rule + source context + history + preferences)
+    AI-->>F: token stream
+    F-->>S: SSE token deltas, then `done`
+    F->>DB: persist exchange (append to tutor_sessions.messages, keep last 20)
+```
+
+If a course has **no embedded material**, `retrieve()` returns `[]` and the tutor
+falls back to accurate general knowledge (the grounding rule forbids contradicting
+sources, never inventing citations) — so the loop still works for an empty class.
+
+---
+
+## 3. What the tutor reads — grounding + memory model
+
+EdSynapse assembles each tutor turn from a few clearly-separated inputs. There is
+one vector workload (content RAG); everything else is plain relational state.
+
+| Input | What it holds | Where it lives | Lifetime |
+|-------|---------------|----------------|----------|
+| **Content RAG** | The authentic material, chunked (~1200 chars, 150 overlap) and embedded | `source_chunks` — `vector(1536)`, ivfflat cosine index | Per course |
+| **Conversation history** | Recent turns for this student + course + topic (last 8 sent to the model, last 20 persisted) | `tutor_sessions.messages` (JSONB) | Across sessions on that topic |
+| **Durable tutor memory** | A rolling 3-sentence summary + ≤8 stable facts about the learner (what they grasp, struggle with, goals) — survives a chat "reset" | `tutor_sessions.memory` (JSONB) | Durable per student+course+topic; refreshed by an LLM consolidation pass after each turn |
+| **Knowledge map** | Mastery per topic — `strong` / `moderate` / `needs_improvement` + evidence | `knowledge_states` (unique per student+course+topic) | Durable; updated by grading |
+| **Learning preferences** | Modality (text / visual / audio) + pace (methodical / deep) | Client UI state, sent per request | Per session (not persisted) |
+
+```mermaid
+flowchart TB
+    MSG["Student message + topic + preferences"] --> ASM["Prompt assembler (/api tutor route)"]
+
+    subgraph RET["Retrieval at prompt time"]
+        direction TB
+        CRAG["Content RAG — pgvector over source_chunks (authentic material)"]
+        HIST["Conversation history — tutor_sessions.messages (recent turns)"]
+    end
+
+    ASM --> CRAG
+    ASM --> HIST
+    CRAG --> PR["Grounded prompt (sources + history + modality/pace)"]
+    HIST --> PR
+    PR --> LLM["OpenAI — streaming chat"]
+    LLM --> OUT["SSE reply + source citations"]
+    LLM --> PERSIST["Append turn to tutor_sessions.messages"]
+    CRAG -. reads .-> DB[("AWS Aurora + pgvector")]
+    HIST -. reads .-> DB
+    PERSIST -. writes .-> DB
+```
+
+**The knowledge map updates on a separate path** — not from tutor chat, but from
+**graded quizzes**. The diagnostic quiz seeds it, and each verify-stage
+assessment grade upserts the relevant topic's mastery level
+(`src/lib/knowledge.ts` → `scoreToLevel` / `upsertKnowledgeState`). That map then
+drives what the student sees in their personal knowledge map and the teacher's
+cohort analytics.
+
+After each turn the tutor route runs a small, non-blocking **LLM consolidation
+pass** (`updateTutorMemory` in `src/lib/llm.ts`) that merges the latest exchange
+into `tutor_sessions.memory` — a condensed summary + a handful of durable facts.
+This memory is replayed into the next turn's system prompt and, unlike
+`messages`, **survives a chat "reset"**, so the tutor keeps remembering the
+learner even after the visible conversation is cleared.
+
+> **Honest scope note:** the durable memory is a *relational* JSONB tier, not a
+> separate semantic/vector learner-memory store. Personalisation today comes from
+> (a) grounding in the learner's own uploaded material, (b) per-topic conversation
+> history, (c) the rolling memory summary, (d) the mastery map from graded work,
+> and (e) the modality/pace preference applied to the prompt. A semantic
+> learner-memory tier (embedded misconceptions, analogies that landed) remains a
+> clean future addition on the same Aurora + pgvector DB.
+
+---
+
+## 4. Conversational surfaces — three distinct chatbots
+
+The student class workspace (`/student/class/[code]`) is organised behind a
+**horizontal navbar with four tabs — Course · Learning · Chat · Discussion**.
+One tab (**Course**) is a read-only material browser; the other three are
+LLM-driven chat surfaces, each with a different job, scope, and retrieval
+strategy. All three stream over the same NDJSON-over-`fetch` transport
+(`data: {json}` lines: `sources` → `delta`s → `done`) and persist to the single
+`tutor_sessions` table, disambiguated by the `topic` column.
+
+| Surface (tab) | Route | Scope | Retrieval | `topic` key | Output style |
+|---------------|-------|-------|-----------|-------------|--------------|
+| **Per-topic Tutor** (Learning) | `/api/student/tutor/stream` | One syllabus topic | Content RAG (cosine top-k) + history + durable memory | the topic name | Teaches — explains, checks understanding mid-stream |
+| **Course Chat** (Chat) | `/api/student/tutor/stream` | Whole course (free-form Q&A) | Content RAG (cosine top-k) + history | `__course_chat__` | Answers — direct, grounded explanations |
+| **Socratic Discussion** (Discussion) | `/api/student/discussion/stream` | Whole course | Content RAG (cosine recall) **+ LLM re-ranker** | `__discussion__` | Socratic — asks questions, probes overall grasp |
+
+**How one route serves two surfaces.** The Per-topic Tutor and Course Chat share
+`/api/student/tutor/stream` — the route has no notion of "which surface." The
+client decides by what it sends in the POST body:
+
+- **`topic`** — the human-readable subject, used for the retrieval query *and* the
+  system prompt. The Per-topic Tutor sends the syllabus topic (e.g.
+  `"Photosynthesis"`); the Course Chat sends the course name.
+- **`topic_key`** — the persistence key (`tutor_sessions.topic`), defaulting to
+  `topic`. The Course Chat overrides it with the sentinel `__course_chat__` so its
+  history is stored separately *without* that sentinel leaking into the prompt or
+  the embedding query. The Per-topic Tutor omits it, so its key is just the topic.
+
+This `topic` / `topic_key` split is the whole distinction: same route, same
+engine, different conversation scope and storage bucket. The Socratic Discussion
+uses its own route (`/api/student/discussion/stream`) and the reserved
+`__discussion__` key. No schema change was needed for any of this.
+
+### 4.1 Per-topic Tutor and Course Chat (the teaching engine)
+
+Both run on the same engine (`streamTutorReply` → tutor stream route, see §2–§3).
+The **Per-topic Tutor** is scoped to a single lesson topic and is the surface
+used inside the Learning study workspace. The **Course Chat** tab points that
+exact same engine at the *whole course* (keyed `__course_chat__`) for free-form
+"explain anything in this course" Q&A. Output is explanatory and may emit
+mid-stream comprehension-check prompts.
+
+### 4.2 Socratic Discussion (assessment through dialogue)
+
+The Discussion tab is a **separate** chatbot whose goal is not to teach a topic
+but to **assess and deepen the learner's overall understanding of the entire
+course through dialogue**. It differs from the tutor in two architectural ways:
+
+**(a) It is Socratic by construction.** Its system prompt (`streamDiscussionReply`
+in `src/lib/llm.ts`) forbids lecturing: it leads with one focused question at a
+time, builds on the learner's previous answer, acknowledges what was correct then
+surfaces a gap with another question, keeps turns short (2–4 sentences) and always
+ends on a question, and offers a small hint only when the learner is stuck. It is
+told the re-ranked course material is the **only** scope for the conversation.
+
+**(b) Retrieval adds a re-ranking stage.** Instead of using raw cosine order, the
+discussion bot runs a two-stage **retrieve → re-rank** pipeline
+(`retrieveReranked` in `src/lib/rag.ts`, surfaced as `rerankedContext`):
+
+1. **Stage 1 — cosine recall.** Pull a wide candidate set (~18 chunks, ≈3× the
+   final `k`) from `source_chunks` by ivfflat cosine similarity.
+2. **Stage 2 — LLM re-rank.** A single zero-temperature JSON call scores each
+   candidate 0–10 for relevance to the learner's latest message; candidates are
+   re-sorted by score and only the top-`k` survive. On any failure it falls back
+   to plain cosine order, so the surface degrades gracefully.
+3. The surviving top-`k` chunks are the entire grounding context handed to the
+   Socratic prompt.
+
+This is a lightweight, infra-free analogue of a cross-encoder re-ranker: the
+recall stage favours breadth (cheap vector search), the re-rank stage favours
+precision (the model judges true relevance) — sharpening what the bot quizzes the
+learner on.
+
+```mermaid
+sequenceDiagram
+    participant S as Student (Discussion tab)
+    participant F as Serverless Function (/api/student/discussion/stream)
+    participant DB as AWS Aurora + pgvector
+    participant AI as OpenAI
+
+    S->>F: POST message + course_id + course_name
+    F->>AI: embed(message)  [text-embedding-3-small]
+    AI-->>F: query embedding
+    F->>DB: stage 1 — cosine recall ~18 candidate chunks (ivfflat `<=>`)
+    DB-->>F: candidate chunks
+    F->>AI: stage 2 — re-rank (score each 0-10, JSON, temperature 0)
+    AI-->>F: relevance scores
+    F->>F: re-sort by score, keep top-k (cosine fallback on failure)
+    F->>DB: load discussion history (tutor_sessions, topic __discussion__)
+    DB-->>F: prior turns (last 30)
+    F-->>S: SSE `sources` event
+    F->>AI: stream Socratic chat (questions only, scoped to top-k material)
+    AI-->>F: token stream
+    F-->>S: SSE token deltas, then `done`
+    F->>DB: persist turn (append to tutor_sessions.messages, keep last 30)
+```
+
+**Persistence.** One rolling conversation per student+course is stored under
+`topic = __discussion__` in `tutor_sessions.messages` (last 30 turns). It is
+loaded/cleared via `GET`/`DELETE /api/student/discussion/history`. Re-ranking is
+recomputed per turn; the discussion bot does not run the tutor's memory
+consolidation pass.
+
+### 4.3 Course tab (material browser, not a bot)
+
+The fourth tab lists every uploaded source for the course (grouped by lesson) and
+can preview a file's extracted text via `GET /api/courses/[id]/sources/[sourceId]`.
+It surfaces exactly the material that grounds all three chatbots above. A
+**Diagnostic Test** launcher also lives in the Learning workspace, running the
+course-wide diagnostic (`/api/student/diagnose/{quiz,evaluate}`) inline and
+seeding the knowledge map.
+
+---
+
+## 5. Service inventory
+
+| Service | Provider | Purpose | Status |
+|---------|----------|---------|--------|
+| Next.js App Router | **Vercel** | UI, routing, role-protected pages | ✅ Live |
+| Edge Middleware | **Vercel** | Cookie-presence route gate (no DB at the edge) | ✅ Live |
+| Serverless Functions (Node.js) | **Vercel** | `/api/*` route handlers — CRUD, RAG ingest, quiz/assessment gen, grading, **and** the SSE tutor stream | ✅ Live |
+| Env vars + OIDC | **Vercel** | `AWS_REGION`, `PGHOST`, `PGUSER`, `PGDATABASE`, `AWS_ROLE_ARN`, `VERCEL_OIDC_TOKEN`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `CRON_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM`, `NEXT_PUBLIC_APP_URL` | ✅ Live |
+| Aurora PostgreSQL 17 (Serverless v2) | **AWS** | Relational data + vector store, reached via IAM/OIDC auth | ✅ Live |
+| pgvector 0.8 | **AWS** | Cosine similarity search over `source_chunks` (content RAG) | ✅ Live |
+| OpenAI API | **External** | `gpt-5-mini` chat (override via `OPENAI_MODEL`), `text-embedding-3-small` embeddings | ✅ Live |
+| Resend API | **External** | Transactional email — account verification + password-reset links (`src/lib/email.ts`). No-ops gracefully when `RESEND_API_KEY` is unset | 🔌 Wired (API key pending) |
+| Google Forms | **External** | Beta feedback capture — linked from the landing nav and the student/teacher app shell (`NEXT_PUBLIC_FEEDBACK_URL`) | 🔌 Wired (form URL pending) |
+
+> File parsing (`unpdf`/`mammoth`/`xlsx`) runs in the serverless function; there
+> is no S3 bucket — extracted text lives in `sources.content`, vectors in
+> `source_chunks`.
+
+---
+
+## 6. How the product works (data flow)
+
+1. **Onboarding (first-party auth).** A user signs up as **teacher** or
+   **student** at `/sign-up` (first/last name + a policy-checked password —
+   ≥8 chars with a letter, number, and special char; scrypt hash + `sessions`
+   row + httpOnly cookie). A **verification email** is sent on signup (Resend);
+   verification is *soft* (not required to use the app) and can be re-sent from
+   `/settings`. Sign-in is a **single unified form** — the account's real DB
+   `role` chooses the destination, with no portal toggle — and is rate-limited.
+   Forgotten passwords are recovered via an emailed, single-use, 1-hour reset
+   link (`/forgot-password` → `/reset-password`). New accounts are routed through
+   a required, role-specific **`/onboarding`** step (education/teaching level,
+   program or department, learning style + pace for students, title for teachers)
+   before reaching a dashboard; `users.onboarded` gates this. Profiles are
+   editable later at **`/settings`**, which also offers hard account deletion
+   (password re-verify → `DELETE FROM users` cascade). The **admin** role is
+   provisioned directly in the database, not via self-signup. Role gates
+   `/teacher/*`, `/student/*`, `/admin/*`. Full detail: [`auth.md`](auth.md).
+2. **Material in (Aurora + pgvector).** A teacher uploads course material to a
+   class (with a join **code**), *or* a student uploads their own files to create
+   a personal `self_study` course. Files are parsed to text in-process, chunked
+   (`src/lib/rag.ts`), embedded via **OpenAI**, and stored as `vector(1536)`
+   rows in `source_chunks` for grounding.
+3. **Diagnose.** An OpenAI-generated diagnostic quiz seeds a per-student
+   **knowledge map** (`knowledge_states`: strong / moderate / needs-improvement).
+4. **Teach + Check (the loop).** The streaming tutor grounds each turn in
+   **content RAG** + **recent conversation history** + **durable memory**, teaches
+   in the student's chosen modality/pace, and checks understanding mid-explanation
+   (see §2–§3). The student can also generate grounded smart notes and flashcards
+   for a topic. The class workspace exposes this behind a four-tab navbar —
+   **Course** (material browser), **Learning** (the study workspace + inline
+   diagnostic), **Chat** (whole-course Q&A tutor), and **Discussion** (the Socratic
+   re-ranked assessment bot) — detailed in §4.
+5. **Verify.** A low-stakes assessment (MCQ + short answer) is auto-graded by
+   OpenAI; results upsert the knowledge map, sharpening the next loop.
+6. **Admin.** The admin console: a user directory (suspend / reactivate), course
+   oversight, and a support inbox of admin ↔ user threads
+   (`support_threads` / `support_messages`). Teachers can also invite teaching
+   assistants (`course_assistants`).
+7. **Feedback (beta).** A **Feedback** link in the landing nav and a **Share
+   Feedback** link in the student/teacher app shell open a Google Form in a new
+   tab (`NEXT_PUBLIC_FEEDBACK_URL`, `src/lib/feedback.ts`) so beta users — both
+   learners and teachers — can shape the v1 launch. No data flows back into the
+   app; responses collect in Google Forms.
+
+See [`../frontend/scripts/001-init-schema.sql`](../frontend/scripts/001-init-schema.sql)
+and [`002-admin-support.sql`](../frontend/scripts/002-admin-support.sql) for the
+data model, and [`../PRD.md`](../PRD.md) for the full product spec.
+
+---
+
+## 7. Deployment
+
+The app is **live** on Vercel (project `edsynapse-beta`, team `awais-projects5`);
+pushing to `main` deploys. The Vercel project root directory is `frontend/`, and
+`frontend/vercel.json` declares `"framework": "nextjs"` (without it the build
+succeeds but serves 404s — the original broken-deploy cause).
+
+Database lifecycle (IAM auth, same OIDC path as the app):
+
+1. Aurora PostgreSQL 17 with `CREATE EXTENSION vector;` (pgvector 0.8).
+2. `npm run db:setup` applies the numbered `scripts/*.sql` files in order
+   (idempotent — safe to re-run). There is no ORM/migration tool.
+3. Env (the AWS/PG IAM set, `OPENAI_API_KEY`, `OPENAI_MODEL`, `CRON_SECRET`, and
+   the email set `RESEND_API_KEY` / `EMAIL_FROM` / `NEXT_PUBLIC_APP_URL`) is
+   configured per-environment in **Vercel**; locally it's pulled with
+   `vercel env pull` (the OIDC token expires ~12 h — re-pull or use `vercel dev`).
+   See [`auth.md`](auth.md) for the Resend env setup (local + Vercel).
+
+There is **no automated test suite**; `npm run build` is the correctness gate.
+
+---
+
+## 8. Notes / strategic alternatives
+
+- **Bedrock vs OpenAI.** Uses OpenAI today. For an AWS-judged hackathon, swapping
+  the LLM/embeddings to **Amazon Bedrock** would deepen the AWS story. The AI
+  layer is isolated behind `src/lib/llm.ts` / `src/lib/openai.ts`, so this is a
+  low-cost swap later. The chat model is already env-configurable via
+  `OPENAI_MODEL`.
+- **IAM/OIDC auth vs a connection string.** EdSynapse reaches Aurora with
+  short-lived, request-scoped RDS tokens (no long-lived `DATABASE_URL` secret) —
+  a deliberate, AWS-native security posture rather than a static password. The
+  trade-off is the local-dev token-refresh gotcha (~12 h).
+- **Durable learner memory (future).** A semantic `learner_memory` tier
+  (misconceptions, what analogies landed, goals) with an LLM consolidation pass
+  would make the tutor more personal over time. It fits the *same* Aurora +
+  pgvector instance — a natural extension of the existing content-RAG workload.
+- **Why Aurora over DynamoDB.** The domain is highly relational *and* needs
+  vector retrieval; Aurora + pgvector does both in one proven DB. (See PRD §6.1.)
+```

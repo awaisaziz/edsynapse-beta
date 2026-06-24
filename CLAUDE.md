@@ -33,9 +33,9 @@ Next.js API route handlers (no separate service).
   is installed — UI primitives in `src/components/ui/` are hand-rolled.
 - **Raw SQL over `pg`** (no ORM — Prisma was removed). All DB access goes through
   `src/lib/db.ts` helpers (`query` / `queryOne` / `withTransaction`).
-- **Amazon Aurora PostgreSQL 17 + pgvector 0.8** (cluster `aws-edsynapse`,
+- **Amazon Aurora PostgreSQL 17 + pgvector 0.8** (cluster `aws-edsynapse-beta`,
   us-east-1). Schema is created/migrated by the SQL files in `frontend/scripts/`.
-- **OpenAI** (`gpt-4o` chat, `text-embedding-3-small` 1536-dim) — server-side
+- **OpenAI** (`gpt-4o-mini` chat, `text-embedding-3-small` 1536-dim) — server-side
   only via `src/lib/openai.ts`: quiz/assessment generation, streaming tutor (SSE),
   grading, and RAG embeddings.
 - Deployed on **Vercel**, project `edsynapse-beta` (team `awais-projects5`).

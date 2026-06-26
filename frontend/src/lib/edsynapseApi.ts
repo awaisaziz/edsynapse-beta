@@ -604,6 +604,7 @@ export interface DiscussionThread {
   updatedAt: string;
   author: DiscussionAuthor;
   replyCount: number;
+  recipient?: { id: string; name: string } | null;
 }
 
 export interface DiscussionPost {
@@ -621,7 +622,7 @@ export const discussionApi = {
   list: (courseId: string) =>
     get<{ threads: DiscussionThread[]; role: CourseRole }>(`/courses/${courseId}/discussions`),
 
-  create: (courseId: string, input: { title: string; body: string; visibility: DiscussionVisibility }) =>
+  create: (courseId: string, input: { title: string; body: string; visibility: DiscussionVisibility; recipientId?: string | null }) =>
     post<{ thread: DiscussionDetail }>(`/courses/${courseId}/discussions`, input),
 
   get: (courseId: string, discussionId: string) =>
@@ -629,4 +630,16 @@ export const discussionApi = {
 
   reply: (courseId: string, discussionId: string, body: string) =>
     post<{ thread: DiscussionDetail }>(`/courses/${courseId}/discussions/${discussionId}`, { body }),
+
+  update: (courseId: string, discussionId: string, input: { title?: string; body?: string; visibility?: DiscussionVisibility }) =>
+    patch<{ thread: DiscussionDetail }>(`/courses/${courseId}/discussions/${discussionId}`, input),
+
+  delete: (courseId: string, discussionId: string) =>
+    del<{ deleted: boolean }>(`/courses/${courseId}/discussions/${discussionId}`),
+
+  updateReply: (courseId: string, discussionId: string, postId: string, body: string) =>
+    patch<{ thread: DiscussionDetail }>(`/courses/${courseId}/discussions/${discussionId}`, { postId, body }),
+
+  deleteReply: (courseId: string, discussionId: string, postId: string) =>
+    del<{ thread: DiscussionDetail }>(`/courses/${courseId}/discussions/${discussionId}?postId=${encodeURIComponent(postId)}`),
 };

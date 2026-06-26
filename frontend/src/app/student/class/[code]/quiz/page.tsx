@@ -227,7 +227,9 @@ export default function QuizPage({ params }: { params: Promise<{ code: string }>
                 <span className="text-[10px] font-bold uppercase tracking-wider text-muted-foreground">
                   Diagnostic Quiz Result
                 </span>
-                <p className="text-4xl font-black text-foreground">{Math.round(report.score * 100)}%</p>
+                <p className="text-4xl font-black text-foreground">
+                  {report.total > 0 ? Math.round((report.correct / report.total) * 100) : 0}%
+                </p>
                 <p className="text-sm font-bold text-primary capitalize">
                   {report.updated_status.level.replace(/_/g, " ")}
                 </p>
@@ -253,15 +255,25 @@ export default function QuizPage({ params }: { params: Promise<{ code: string }>
                     ) : (
                       <CheckCircle className="w-5 h-5 shrink-0 text-rose-500 mt-0.5" />
                     )}
-                    <div className="space-y-1 text-xs">
-                      <Markdown className="text-xs font-bold text-foreground">{q?.prompt ?? `Q${i + 1}`}</Markdown>
-                      <p className="text-muted-foreground">
-                        Your answer: <span className="font-semibold text-foreground">{r.student_response || "—"}</span>
-                      </p>
-                      <p className="text-muted-foreground">
-                        Correct answer: <span className="font-semibold text-foreground">{r.correct_answer}</span>
-                      </p>
-                      {r.rationale && <Markdown className="text-xs text-foreground/80 leading-relaxed mt-2">{r.rationale}</Markdown>}
+                    <div className="space-y-1 text-xs min-w-0 flex-1">
+                      <Markdown className="text-xs font-bold text-foreground" children={q?.prompt ?? `Q${i + 1}`} />
+                      <div className="text-muted-foreground flex gap-1 items-start">
+                        <span className="shrink-0">Your answer:</span>
+                        {r.student_response ? (
+                          <Markdown className="text-xs font-semibold text-foreground [&_p]:my-0" children={r.student_response} />
+                        ) : (
+                          <span className="font-semibold text-foreground">—</span>
+                        )}
+                      </div>
+                      <div className="text-muted-foreground flex gap-1 items-start">
+                        <span className="shrink-0">Correct answer:</span>
+                        {r.correct_answer ? (
+                          <Markdown className="text-xs font-semibold text-foreground [&_p]:my-0" children={r.correct_answer} />
+                        ) : (
+                          <span className="font-semibold text-foreground">—</span>
+                        )}
+                      </div>
+                      {r.rationale && <Markdown className="text-xs text-foreground/80 leading-relaxed mt-2" children={r.rationale} />}
                     </div>
                   </div>
                 );

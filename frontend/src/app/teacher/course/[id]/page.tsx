@@ -39,6 +39,7 @@ import {
 } from "@/lib/edsynapseApi";
 import { FileUploadZone } from "@/components/ui/FileUploadZone";
 import { DiscussionBoard } from "@/components/ui/DiscussionBoard";
+import Markdown from "@/components/ui/Markdown";
 
 
 const LEVEL_TONE: Record<string, string> = {
@@ -954,7 +955,11 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
           </div>
         )}
 
-        {activeTab === "discussion" && <DiscussionBoard courseId={id} />}
+        {activeTab === "discussion" && (
+          <div className="h-[calc(100vh-220px)] min-h-[550px] w-full flex flex-col">
+            <DiscussionBoard courseId={id} />
+          </div>
+        )}
       </main>
 
       {shareToast && (
@@ -1006,21 +1011,30 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
                         q.correct === true ? "bg-emerald-500" : q.correct === false ? "bg-rose-500" : "bg-amber-500")}>
                         {q.correct === true ? "✓" : q.correct === false ? "✕" : "~"}
                       </span>
-                      <p className="flex-1 text-[13px] font-bold text-foreground">{i + 1}. {q.prompt}</p>
+                      <div className="flex-1 text-[13px] font-bold text-foreground flex gap-1.5 items-start min-w-0">
+                        <span className="shrink-0">{i + 1}.</span>
+                        <Markdown className="text-[13px] font-bold text-foreground [&_p]:my-0" children={q.prompt} />
+                      </div>
                     </div>
                     <div className="space-y-1.5 pl-7">
-                      <p className="text-[11px]">
-                        <span className="font-bold text-muted-foreground">Their answer: </span>
-                        <span className={cn(q.correct === false ? "text-rose-600" : "text-foreground")}>{q.studentResponse || "— (no answer)"}</span>
-                      </p>
+                      <div className="text-[11px] flex gap-1 items-start">
+                        <span className="font-bold text-muted-foreground shrink-0">Their answer:</span>
+                        {q.studentResponse ? (
+                          <Markdown className={cn("text-[11px] [&_p]:my-0", q.correct === false ? "text-rose-600 [&_p]:text-rose-600" : "text-foreground")} children={q.studentResponse} />
+                        ) : (
+                          <span className="text-foreground">— (no answer)</span>
+                        )}
+                      </div>
                       {q.correct !== true && q.correctAnswer && (
-                        <p className="text-[11px]">
-                          <span className="font-bold text-muted-foreground">Correct answer: </span>
-                          <span className="text-emerald-700">{q.correctAnswer}</span>
-                        </p>
+                        <div className="text-[11px] flex gap-1 items-start">
+                          <span className="font-bold text-muted-foreground shrink-0">Correct answer:</span>
+                          <Markdown className="text-[11px] text-emerald-700 [&_p]:text-emerald-700 [&_p]:my-0" children={q.correctAnswer} />
+                        </div>
                       )}
                       {q.rationale && (
-                        <p className="rounded-xl bg-primary/[0.04] px-3 py-2 text-[11px] leading-5 text-[#424245]">{q.rationale}</p>
+                        <div className="rounded-xl bg-primary/[0.04] px-3 py-2">
+                          <Markdown className="text-[11px] leading-5 text-[#424245]" children={q.rationale} />
+                        </div>
                       )}
                     </div>
                   </div>

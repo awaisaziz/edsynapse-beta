@@ -101,7 +101,7 @@ function StrengthsGapsInner() {
     if (actionType === "tutor") {
       router.push(`/student/class/${code}?topic=${queryTopic}&mode=chat`);
     } else if (actionType === "quiz") {
-      router.push(`/student/class/${code}/quiz?topic=${queryTopic}`);
+      router.push(`/student/class/${code}?diagnostic=true`);
     } else if (actionType === "review") {
       router.push(`/student/class/${code}?tab=notes&topic=${queryTopic}`);
     } else if (actionType === "assessment") {

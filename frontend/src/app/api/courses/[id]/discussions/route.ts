@@ -30,10 +30,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const role = await resolveCourseRole(courseId, user.id);
     if (!isMember(role)) return NextResponse.json({ error: "No access to this course." }, { status: 403 });
 
-    const body = (await req.json()) as { title?: unknown; body?: unknown; visibility?: unknown };
+    const body = (await req.json()) as { title?: unknown; body?: unknown; visibility?: unknown; recipientId?: unknown; recipient_id?: unknown };
     const title = String(body.title ?? "").trim();
     if (!title) return NextResponse.json({ error: "A title is required." }, { status: 400 });
     const visibility = body.visibility === "private" ? "private" : "public";
+    const recipientId = (typeof body.recipientId === "string" ? body.recipientId : typeof body.recipient_id === "string" ? body.recipient_id : null);
 
     const discussionId = await createDiscussion({
       courseId,
@@ -41,6 +42,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       title: title.slice(0, 300),
       body: String(body.body ?? "").trim().slice(0, 5000),
       visibility,
+      recipientId,
     });
 
     const thread = await getDiscussion(courseId, discussionId, { id: user.id, role });

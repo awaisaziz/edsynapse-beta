@@ -618,8 +618,17 @@ function ConversationPanel({
               return (
                 <div
                   key={t.topic}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => selectThread(t.topic)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      selectThread(t.topic);
+                    }
+                  }}
                   className={cn(
-                    "group flex items-center gap-1 rounded-xl px-2.5 py-2 transition-all cursor-pointer border",
+                    "group flex items-center gap-1 rounded-xl px-2.5 py-2 transition-all cursor-pointer border outline-none focus-visible:ring-2 focus-visible:ring-primary",
                     active
                       ? "bg-white shadow-sm border-primary/30 ring-1 ring-primary/15"
                       : "border-transparent hover:bg-white hover:border-primary/20 hover:shadow-sm",
@@ -631,33 +640,42 @@ function ConversationPanel({
                       value={editDraft}
                       onChange={(e) => setEditDraft(e.target.value)}
                       onKeyDown={(e) => {
+                        e.stopPropagation();
                         if (e.key === "Enter") saveRename(t.topic);
                         if (e.key === "Escape") setEditingTopic(null);
                       }}
+                      onClick={(e) => e.stopPropagation()}
                       onBlur={() => saveRename(t.topic)}
                       className="flex-1 min-w-0 rounded-lg border border-primary/20 bg-white px-2 py-1 text-xs font-semibold text-foreground outline-none"
                     />
                   ) : (
-                    <button onClick={() => selectThread(t.topic)} className="flex-1 min-w-0 text-left">
+                    <div className="flex-1 min-w-0 text-left">
                       <p className={cn("truncate text-xs font-bold", active ? "text-foreground" : "text-foreground/80")}>
                         {t.title}
                       </p>
                       {t.preview && <p className="truncate text-[10px] text-muted-foreground">{t.preview}</p>}
-                    </button>
+                    </div>
                   )}
                   {editingTopic === t.topic ? (
                     <button
                       onMouseDown={(e) => e.preventDefault()}
-                      onClick={() => saveRename(t.topic)}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        saveRename(t.topic);
+                      }}
                       title="Save name"
                       className="shrink-0 rounded-lg p-1 text-emerald-600 hover:bg-emerald-500/10"
                     >
                       <Check className="w-3.5 h-3.5" />
                     </button>
                   ) : (
-                    <div className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100">
+                    <div
+                      className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
+                      onClick={(e) => e.stopPropagation()}
+                    >
                       <button
-                        onClick={() => {
+                        onClick={(e) => {
+                          e.stopPropagation();
                           setEditingTopic(t.topic);
                           setEditDraft(t.title);
                         }}
@@ -667,7 +685,10 @@ function ConversationPanel({
                         <Pencil className="w-3 h-3" />
                       </button>
                       <button
-                        onClick={() => setDeleteTarget(t)}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setDeleteTarget(t);
+                        }}
                         title="Delete"
                         className="rounded-lg p-1 text-muted-foreground hover:bg-red-500/10 hover:text-red-600"
                       >
@@ -1827,6 +1848,11 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
   useEffect(() => {
     const topicParam = searchParams.get("topic");
     const tabParam = searchParams.get("tab");
+    const diagnosticParam = searchParams.get("diagnostic");
+
+    if (diagnosticParam === "true" || diagnosticParam === "1") {
+      setDiagnosticOpen(true);
+    }
 
     if (topicParam && courseId) {
       const decodedTopic = decodeURIComponent(topicParam);
@@ -2140,10 +2166,8 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
           }
         />
       ) : view === "board" ? (
-        <div className="flex-1 overflow-y-auto px-6 py-6 scrollbar-hide">
-          <div className="mx-auto max-w-5xl">
-            <DiscussionBoard courseId={courseId!} />
-          </div>
+        <div className="flex-1 flex flex-col min-h-0 p-6 overflow-hidden">
+          <DiscussionBoard courseId={courseId!} />
         </div>
       ) : (
       <>
@@ -2291,7 +2315,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
                   className="flex w-full items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-500/5 px-3 py-2.5 text-left text-xs font-bold text-emerald-700 cursor-pointer transition-all duration-150 hover:scale-[1.02] hover:shadow-md hover:bg-emerald-500/10 active:scale-[0.98]"
                 >
                   <Trophy className="w-4 h-4 shrink-0 text-emerald-600" />
-                  <span>Take formal assessment</span>
+                  <span>Take Assessment</span>
                   <ChevronRight className="ml-auto w-3.5 h-3.5" />
                 </Link>
               </div>

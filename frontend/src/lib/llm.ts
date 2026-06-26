@@ -206,6 +206,7 @@ export async function* streamSocraticReply(params: {
     `- Teacher's/Your Primary Role: Probing with questions, challenging logic, and exposing contradictions.`,
     `- Ultimate Cognitive Goal: Exposing logic flaws, improving critical thinking, and checking understanding.`,
     `Keep each reply brief and conversational (typically 2-4 sentences) and always end with a single, clear, probing question.`,
+    `Vary how you phrase your questions — be genuinely creative and avoid formulaic openers. Do NOT repeatedly start with "What do you think". Mix it up across turns: pose a concrete scenario or edge case ("Imagine you...", "Suppose..."), challenge directly ("How would you defend...", "What breaks if..."), invite prediction ("What would happen if..."), ask for a counterexample, request an analogy, or have them critique a deliberately flawed claim. Let the question's form fit the idea, and keep the phrasing fresh from one turn to the next.`,
     GROUNDING_RULE,
     `Adapt to the learner: modality preference = ${params.modality}, pace = ${params.pace}.`,
     `Format your replies in Markdown (headings, bold, lists). Write all mathematical notation in LaTeX, delimited ONLY with dollar signs: inline math as $...$ and display equations as $$...$$. Never use \\( \\) or \\[ \\] delimiters.`,
@@ -220,7 +221,7 @@ export async function* streamSocraticReply(params: {
   const stream = await getChatClient().chat.completions.create({
     model: CHAT_MODEL,
     stream: true,
-    temperature: 0.7,
+    temperature: 0.8,
     messages: [
       { role: "system", content: system },
       ...params.history.slice(-8),
@@ -253,6 +254,7 @@ export async function* streamDiscussionReply(params: {
     `Stay strictly within the scope of the course material below — do not drift to topics the course does not cover.`,
     GROUNDING_RULE,
     `Be genuinely Socratic: lead with one focused question at a time, build on the learner's previous answer, gently probe assumptions, and ask "why" / "how" / "what if". Do NOT lecture or hand over full explanations; draw the reasoning out of the learner.`,
+    `Vary how you phrase your questions — be genuinely creative and avoid formulaic openers. Do NOT repeatedly start with "What do you think". Mix it up across turns: pose a concrete scenario or edge case ("Imagine you...", "Suppose..."), challenge directly ("How would you defend...", "What breaks if..."), invite prediction, ask for a counterexample, request an analogy, or have them critique a deliberately flawed claim. Let the question's form fit the idea, and keep the phrasing fresh from one turn to the next.`,
     `When the learner answers, briefly acknowledge what was correct, surface any gap or misconception with another question, then advance to the next idea. Keep each turn short (2-4 sentences) and end with a question.`,
     `If the learner is clearly stuck, offer a small hint, then re-ask a simpler question.`,
     `Format replies in Markdown. Write all mathematical notation in LaTeX delimited ONLY with dollar signs ($...$ inline, $$...$$ display). Never use \\( \\) or \\[ \\]. Use \\{ and \\} for set braces.`,
@@ -266,7 +268,7 @@ export async function* streamDiscussionReply(params: {
   const stream = await getChatClient().chat.completions.create({
     model: CHAT_MODEL,
     stream: true,
-    temperature: 0.7,
+    temperature: 0.8,
     messages: [
       { role: "system", content: system },
       ...params.history.slice(-10),

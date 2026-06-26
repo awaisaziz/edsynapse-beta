@@ -342,7 +342,7 @@ export function AppShell({ children, role = "student" }: AppShellProps) {
 
       {/* Main Content Area — no desktop topbar; the sidebar is the sole nav and
           the content reclaims the full height. */}
-      <div className="flex-1 flex flex-col min-w-0 pt-16 md:pt-0 overflow-y-auto h-screen scrollbar-hide">
+      <div className="flex-1 flex flex-col min-w-0 pt-16 md:pt-0 overflow-y-auto h-screen">
         {/* Content */}
         <main className="flex-1 p-6 md:p-8 max-w-7xl w-full mx-auto pb-12">
           {children}

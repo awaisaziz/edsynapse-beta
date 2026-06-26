@@ -33,20 +33,24 @@ export function ContactAdminModal({ open, onClose }: ContactAdminModalProps) {
 
   useEffect(() => {
     if (!open) return;
-    let cancelled = false;
     setSent(false);
-    (async () => {
+
+    const fetchSupport = async () => {
       try {
         const res = await fetch("/api/support", { credentials: "include" });
         if (!res.ok) return;
         const data = (await res.json()) as { thread: SupportThread | null };
-        if (!cancelled) setThread(data.thread);
+        setThread(data.thread);
       } catch {
         /* leave thread as-is */
       }
-    })();
+    };
+
+    fetchSupport();
+    const interval = setInterval(fetchSupport, 4000);
+
     return () => {
-      cancelled = true;
+      clearInterval(interval);
     };
   }, [open]);
 

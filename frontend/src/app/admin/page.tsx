@@ -74,6 +74,20 @@ export default function AdminDashboard() {
     };
   }, [router, refresh]);
 
+  // Periodic background polling for admin dashboard (every 5 seconds)
+  useEffect(() => {
+    if (!authChecked) return;
+    const interval = setInterval(async () => {
+      try {
+        await refresh();
+      } catch (err) {
+        console.warn("[AdminDashboard] Background auto-refresh failed:", err);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [authChecked, refresh]);
+
   if (!authChecked) {
     return (
       <div className="flex min-h-[100dvh] items-center justify-center bg-[#f0f6ff] text-sm text-muted-foreground">

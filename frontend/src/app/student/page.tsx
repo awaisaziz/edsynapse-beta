@@ -15,7 +15,6 @@ import {
   Plus,
   Sparkles,
   X,
-  BookMarked,
   LifeBuoy,
   Archive,
 } from "lucide-react";
@@ -46,6 +45,25 @@ export default function StudentDashboard() {
   useEffect(() => {
     load();
   }, [load]);
+
+  // Periodic background polling for student courses (every 5 seconds)
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        const { courses: updatedCourses } = await studentApi.listCourses();
+        setCourses((prev) => {
+          // Compare to prevent unnecessary state updates
+          const changed = prev.length !== updatedCourses.length ||
+            updatedCourses.some((c, i) => !prev[i] || c.archived !== prev[i].archived || c.color !== prev[i].color || c.name !== prev[i].name || c.lessons.length !== prev[i].lessons.length);
+          return changed ? updatedCourses : prev;
+        });
+      } catch (err) {
+        console.warn("[StudentDashboard] Background auto-refresh failed:", err);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, []);
 
   // Optimistically patch one course in local state, fall back to a reload on error.
   const patchCourse = useCallback(
@@ -171,14 +189,6 @@ export default function StudentDashboard() {
           <h1 className="text-2xl font-bold tracking-tight text-foreground font-display">My Learning Space</h1>
 
           <div className="flex flex-wrap items-center gap-2">
-            <Link
-              href="/student/strengths-gaps"
-              className="flex h-9 items-center gap-1.5 rounded-xl border border-primary/15 bg-white/70 px-3 text-xs font-bold text-primary transition-all hover:bg-white active:scale-[0.97]"
-            >
-              <BookMarked className="w-3.5 h-3.5" />
-              <span>Strengths & Gaps</span>
-            </Link>
-
             <button
               onClick={() => setActiveModal("join")}
               className="flex h-9 items-center gap-1.5 rounded-xl border border-primary/10 bg-white/70 px-3 text-xs font-bold text-foreground transition-all hover:bg-white active:scale-[0.97]"

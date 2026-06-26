@@ -356,6 +356,35 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
     return () => { cancelled = true; };
   }, [id]);
 
+  // Periodic background polling for teacher course view (every 5 seconds)
+  useEffect(() => {
+    const interval = setInterval(async () => {
+      try {
+        if (!busyLesson && !removeStudentBusy && !recordLoading && !reviewLoading) {
+          // 1. Reload course
+          const { course: updatedCourse } = await teacherApi.getCourse(id);
+          setCourse((prev) => {
+            if (!prev) return updatedCourse;
+            const changed = prev.name !== updatedCourse.name || 
+              prev.lessons.length !== updatedCourse.lessons.length ||
+              prev.lessons.some((l, i) => !updatedCourse.lessons[i] || l.published !== updatedCourse.lessons[i].published || l.materials.length !== updatedCourse.lessons[i].materials.length || l.outline.length !== updatedCourse.lessons[i].outline.length);
+            return changed ? updatedCourse : prev;
+          });
+
+          // 2. Reload analytics if tab is students
+          if (activeTab === "students") {
+            const updatedAnalytics = await teacherApi.getAnalytics(id);
+            setAnalytics(updatedAnalytics);
+          }
+        }
+      } catch (err) {
+        console.warn("[TeacherCoursePage] Background auto-refresh failed:", err);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [id, activeTab, busyLesson, removeStudentBusy, recordLoading, reviewLoading]);
+
   // Load analytics when the Students tab is first opened
   useEffect(() => {
     if (activeTab !== "students" || analytics) return;
@@ -562,7 +591,7 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
   const selectedStudent = students.find((s) => s.id === selectedStudentId) ?? null;
 
   return (
-    <div className="relative min-h-[100dvh] overflow-hidden bg-[#f0f6ff] text-[#1d1d1f] font-sans pb-12">
+    <div className="relative h-screen flex flex-col overflow-hidden bg-[#f0f6ff] text-[#1d1d1f] font-sans">
       <div className="pointer-events-none absolute inset-0 liquid-canvas" />
 
       {/* ── Header ── */}
@@ -616,7 +645,14 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
       </header>
 
       {/* ── Main ── */}
-      <main className="relative z-10 mx-auto max-w-[1100px] px-6 py-8 space-y-6">
+      <main
+        className={cn(
+          "relative z-10 w-full flex-1 min-h-0",
+          activeTab === "discussion"
+            ? "flex flex-col p-6 overflow-hidden"
+            : "w-full px-6 md:px-12 py-8 space-y-6 overflow-y-auto"
+        )}
+      >
         {activeTab === "content" && (
           <>
             <div className="flex flex-wrap items-center justify-between gap-4">
@@ -955,11 +991,7 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
           </div>
         )}
 
-        {activeTab === "discussion" && (
-          <div className="h-[calc(100vh-220px)] min-h-[550px] w-full flex flex-col">
-            <DiscussionBoard courseId={id} />
-          </div>
-        )}
+        {activeTab === "discussion" && <DiscussionBoard courseId={id} />}
       </main>
 
       {shareToast && (

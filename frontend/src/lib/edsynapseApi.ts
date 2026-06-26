@@ -605,6 +605,7 @@ export interface DiscussionThread {
   author: DiscussionAuthor;
   replyCount: number;
   recipient?: { id: string; name: string } | null;
+  isAnonymous?: boolean;
 }
 
 export interface DiscussionPost {
@@ -612,6 +613,9 @@ export interface DiscussionPost {
   body: string;
   createdAt: string;
   author: DiscussionAuthor;
+  anonymous?: boolean;
+  upvoteCount?: number;
+  upvotedByMe?: boolean;
 }
 
 export interface DiscussionDetail extends DiscussionThread {
@@ -622,14 +626,14 @@ export const discussionApi = {
   list: (courseId: string) =>
     get<{ threads: DiscussionThread[]; role: CourseRole }>(`/courses/${courseId}/discussions`),
 
-  create: (courseId: string, input: { title: string; body: string; visibility: DiscussionVisibility; recipientId?: string | null }) =>
+  create: (courseId: string, input: { title: string; body: string; visibility: DiscussionVisibility; recipientId?: string | null; anonymous?: boolean }) =>
     post<{ thread: DiscussionDetail }>(`/courses/${courseId}/discussions`, input),
 
   get: (courseId: string, discussionId: string) =>
     get<{ thread: DiscussionDetail }>(`/courses/${courseId}/discussions/${discussionId}`),
 
-  reply: (courseId: string, discussionId: string, body: string) =>
-    post<{ thread: DiscussionDetail }>(`/courses/${courseId}/discussions/${discussionId}`, { body }),
+  reply: (courseId: string, discussionId: string, body: string, anonymous?: boolean) =>
+    post<{ thread: DiscussionDetail }>(`/courses/${courseId}/discussions/${discussionId}`, { body, anonymous }),
 
   update: (courseId: string, discussionId: string, input: { title?: string; body?: string; visibility?: DiscussionVisibility }) =>
     patch<{ thread: DiscussionDetail }>(`/courses/${courseId}/discussions/${discussionId}`, input),
@@ -642,4 +646,7 @@ export const discussionApi = {
 
   deleteReply: (courseId: string, discussionId: string, postId: string) =>
     del<{ thread: DiscussionDetail }>(`/courses/${courseId}/discussions/${discussionId}?postId=${encodeURIComponent(postId)}`),
+
+  upvoteReply: (courseId: string, discussionId: string, postId: string) =>
+    patch<{ thread: DiscussionDetail }>(`/courses/${courseId}/discussions/${discussionId}`, { upvotePostId: postId }),
 };

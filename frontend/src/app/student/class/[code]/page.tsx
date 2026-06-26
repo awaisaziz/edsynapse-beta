@@ -42,6 +42,8 @@ import {
   Check,
   Copy,
   AlertTriangle,
+  Play,
+  RefreshCw,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Markdown from "@/components/ui/Markdown";
@@ -413,13 +415,19 @@ function ConversationPanel({
             .then(({ messages }) => {
               if (!cancelled) setMessages(messages.length ? messages.map(mapStored) : [{ role: "ai", text: welcome }]);
             })
-            .catch(() => !cancelled && setMessages([{ role: "ai", text: welcome }]));
+            .catch((err) => {
+              console.error("[ConversationPanel] Initial history load failed:", err);
+              if (!cancelled) setMessages([{ role: "ai", text: welcome }]);
+            });
         } else {
           setActiveTopic(null);
           setMessages([{ role: "ai", text: welcome }]);
         }
       })
-      .catch(() => !cancelled && setThreads([]))
+      .catch((err) => {
+        console.error("[ConversationPanel] Failed to list conversations:", err);
+        if (!cancelled) setThreads([]);
+      })
       .finally(() => !cancelled && setThreadsLoading(false));
     return () => {
       cancelled = true;
@@ -433,19 +441,24 @@ function ConversationPanel({
   }, [messages, generating]);
 
   const selectThread = useCallback(
-    async (topic: string) => {
-      if (topic === activeTopic || !courseId) return;
+    async (topic: string, force = false) => {
+      if (!force && topic === activeTopic && messages.length > 1) return;
+      if (!courseId) return;
       abortRef.current?.abort();
       setActiveTopic(topic);
       setMessages([{ role: "ai", text: welcome }]);
       try {
-        const { messages } = await studentApi.getTutorHistory(courseId, topic);
-        if (messages.length) setMessages(messages.map(mapStored));
-      } catch {
-        /* keep welcome */
+        const { messages: historyMsgs } = await studentApi.getTutorHistory(courseId, topic);
+        if (historyMsgs.length) {
+          setMessages(historyMsgs.map(mapStored));
+        } else {
+          setMessages([{ role: "ai", text: welcome }]);
+        }
+      } catch (err) {
+        console.error("[ConversationPanel] Failed to load tutor history:", err);
       }
     },
-    [activeTopic, courseId, welcome],
+    [activeTopic, messages.length, courseId, welcome],
   );
 
   const newThread = useCallback(async () => {
@@ -967,7 +980,7 @@ function CoursePanel({ course, courseColor }: { course: Course | null; courseCol
   }, [sources]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-8 scrollbar-hide">
+    <div className="flex-1 overflow-y-auto px-6 py-8">
       <div className="mx-auto max-w-3xl space-y-6">
         {/* Header */}
         <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
@@ -1132,18 +1145,49 @@ function DiagnosticPanel({
   courseId,
   topics,
   strengthsGaps,
+  isOpen,
   onClose,
+  phase,
+  setPhase,
+  quiz,
+  setQuiz,
+  answers,
+  setAnswers,
+  result,
+  setResult,
+  error,
+  setError,
 }: {
   courseId: string;
   topics: string[];
   strengthsGaps: StrengthsGaps | null;
+  isOpen: boolean;
   onClose: () => void;
+  phase: "intro" | "loading" | "quiz" | "grading" | "result" | "error" | "resume";
+  setPhase: React.Dispatch<React.SetStateAction<"intro" | "loading" | "quiz" | "grading" | "result" | "error" | "resume">>;
+  quiz: DiagnosticQuiz | null;
+  setQuiz: React.Dispatch<React.SetStateAction<DiagnosticQuiz | null>>;
+  answers: Record<string, string>;
+  setAnswers: React.Dispatch<React.SetStateAction<Record<string, string>>>;
+  result: StrengthsGaps | null;
+  setResult: React.Dispatch<React.SetStateAction<StrengthsGaps | null>>;
+  error: string;
+  setError: React.Dispatch<React.SetStateAction<string>>;
 }) {
-  const [phase, setPhase] = useState<"intro" | "loading" | "quiz" | "grading" | "result" | "error">("intro");
-  const [quiz, setQuiz] = useState<DiagnosticQuiz | null>(null);
-  const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [result, setResult] = useState<StrengthsGaps | null>(null);
-  const [error, setError] = useState("");
+  // Reset or set to resume phase when diagnostic panel is opened/closed
+  useEffect(() => {
+    if (isOpen) {
+      if (quiz && (phase === "quiz" || phase === "resume")) {
+        setPhase("resume");
+      } else if (phase === "result" || phase === "error") {
+        setQuiz(null);
+        setAnswers({});
+        setResult(null);
+        setError("");
+        setPhase("intro");
+      }
+    }
+  }, [isOpen]);
 
   // Build a weakness-first ranked topic list.
   // Priority: needs_improvement → moderate → untested → strong.
@@ -1179,7 +1223,22 @@ function DiagnosticPanel({
       setError(e instanceof Error ? e.message : "Couldn't build the diagnostic.");
       setPhase("error");
     }
-  }, [courseId, targetTopics, weakTopics]);
+  }, [courseId, targetTopics, weakTopics, setPhase, setQuiz, setError]);
+
+  const resetAndStart = useCallback(async () => {
+    setQuiz(null);
+    setAnswers({});
+    setError("");
+    setPhase("loading");
+    try {
+      const q = await studentApi.diagnoseQuiz(courseId, targetTopics, weakTopics);
+      setQuiz(q);
+      setPhase("quiz");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Couldn't build the diagnostic.");
+      setPhase("error");
+    }
+  }, [courseId, targetTopics, weakTopics, setQuiz, setAnswers, setError, setPhase]);
 
   const submit = useCallback(async () => {
     if (!quiz) return;
@@ -1198,10 +1257,10 @@ function DiagnosticPanel({
       setError(e instanceof Error ? e.message : "Couldn't grade your diagnostic.");
       setPhase("error");
     }
-  }, [quiz, answers, courseId, targetTopics]);
+  }, [quiz, answers, courseId, targetTopics, setPhase, setResult, setError]);
 
   return (
-    <div className="flex-1 overflow-y-auto px-6 py-8 scrollbar-hide">
+    <div className="flex-1 overflow-y-auto px-6 py-8">
       <div className="mx-auto max-w-2xl space-y-6">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2.5">
@@ -1314,6 +1373,39 @@ function DiagnosticPanel({
           </div>
         )}
 
+        {phase === "resume" && (
+          <div className="liquid-panel rounded-3xl p-6 space-y-6 text-center edsynapse-stagger">
+            <div className="mx-auto flex w-12 h-12 items-center justify-center rounded-2xl bg-primary/10 text-primary">
+              <ClipboardCheck className="w-6 h-6 animate-pulse" />
+            </div>
+            <div className="space-y-2">
+              <h3 className="text-base font-bold text-foreground font-display">
+                Diagnostic Quiz in Progress
+              </h3>
+              <p className="text-xs text-muted-foreground leading-relaxed max-w-md mx-auto">
+                You have an active, incomplete diagnostic test. You can continue where you left off or ask to generate a fresh one.
+              </p>
+            </div>
+
+            <div className="flex flex-col sm:flex-row gap-3 justify-center pt-2">
+              <button
+                onClick={() => setPhase("quiz")}
+                className="flex items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-3 text-xs font-bold text-white shadow-lg shadow-primary/20 transition-all hover:bg-primary/95 active:scale-[0.98]"
+              >
+                <Play className="w-4 h-4" />
+                Continue with that quiz
+              </button>
+              <button
+                onClick={resetAndStart}
+                className="flex items-center justify-center gap-2 rounded-2xl border border-primary/20 bg-white px-5 py-3 text-xs font-bold text-primary transition-all hover:bg-primary/5 active:scale-[0.98]"
+              >
+                <RefreshCw className="w-4 h-4" />
+                Re-generate diagnostic
+              </button>
+            </div>
+          </div>
+        )}
+
         {(phase === "loading" || phase === "grading") && (
           <div className="py-24 flex flex-col items-center justify-center text-center space-y-4 edsynapse-stagger">
             <div className="w-10 h-10 animate-spin rounded-full border-2 border-primary/20 border-t-primary" />
@@ -1412,6 +1504,12 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
   const [view, setView] = useState<ClassView>("learning");
   // Inline course-wide diagnostic (replaces the old "Select a concept" slot).
   const [diagnosticOpen, setDiagnosticOpen] = useState(false);
+  // Hoisted diagnostic test states to preserve progress across page/view switches
+  const [diagnosticPhase, setDiagnosticPhase] = useState<"intro" | "loading" | "quiz" | "grading" | "result" | "error" | "resume">("intro");
+  const [diagnosticQuiz, setDiagnosticQuiz] = useState<DiagnosticQuiz | null>(null);
+  const [diagnosticAnswers, setDiagnosticAnswers] = useState<Record<string, string>>({});
+  const [diagnosticResult, setDiagnosticResult] = useState<StrengthsGaps | null>(null);
+  const [diagnosticError, setDiagnosticError] = useState("");
   const [chatInput, setChatInput] = useState("");
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [studyStarted, setStudyStarted] = useState(false);
@@ -1581,6 +1679,34 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
       .catch(() => { if (!cancelled) setStrengthsGaps(null); });
     return () => { cancelled = true; };
   }, [courseId]);
+
+  // Periodic background polling for classroom view (every 5 seconds)
+  useEffect(() => {
+    if (!courseId) return;
+    const interval = setInterval(async () => {
+      try {
+        if (!diagnosticOpen && !generating && !notesLoading && !flashcardsLoading) {
+          // 1. Reload course
+          const { course: updatedCourse } = await studentApi.getCourseByCode(code);
+          setCourseData((prev) => {
+            if (!prev) return updatedCourse;
+            const changed = prev.name !== updatedCourse.name || 
+              prev.lessons.length !== updatedCourse.lessons.length ||
+              prev.lessons.some((l, i) => !updatedCourse.lessons[i] || l.published !== updatedCourse.lessons[i].published || l.outline.length !== updatedCourse.lessons[i].outline.length);
+            return changed ? updatedCourse : prev;
+          });
+
+          // 2. Reload strengths-gaps
+          const map = await studentApi.getStrengthsGaps(courseId);
+          setStrengthsGaps(map);
+        }
+      } catch (err) {
+        console.warn("[StudentClassPage] Background auto-refresh failed:", err);
+      }
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [courseId, code, diagnosticOpen, generating, notesLoading, flashcardsLoading]);
 
   // Socratic AI starter prompts: generic topics at first, then the student's
   // weakest topics (needs_improvement → moderate → strong) once we have quiz
@@ -1982,6 +2108,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
   // lesson's topic set. The tutor is grounded in the course material.
   const startLesson = useCallback(
     (lesson: CourseLesson) => {
+      setDiagnosticOpen(false);
       // Can't generate study material without source material — prompt the
       // student to upload it instead of opening an empty smart-notes page.
       if (lesson.materials.length === 0) {
@@ -2013,13 +2140,14 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
         `Welcome to Lesson ${lesson.lesson}: ${lesson.title}. I've built grounded study material from this lesson's ${lesson.materials.length} source file${lesson.materials.length === 1 ? "" : "s"}, covering ${lesson.outline.length} topic${lesson.outline.length === 1 ? "" : "s"}. Ready when you are!`,
       );
     },
-    [triggerMaterialGeneration, prefetchLessonMaterials, hydrateChat],
+    [triggerMaterialGeneration, prefetchLessonMaterials, hydrateChat, setDiagnosticOpen],
   );
 
   // Jump straight into studying a single topic from the sidebar — no need to go
   // through a lesson or the knowledge map.
   const startTopic = useCallback(
     (topic: string) => {
+      setDiagnosticOpen(false);
       setCurrentTopic(topic);
       setStudyStarted(true);
       setActiveMode("notes");
@@ -2029,7 +2157,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
         `Let's dive into ${topic}. I've prepared grounded study material in the sidebar — ask me anything to go deeper.`,
       );
     },
-    [triggerMaterialGeneration, hydrateChat],
+    [triggerMaterialGeneration, hydrateChat, setDiagnosticOpen],
   );
 
   // Return to the lesson-selection screen for this course (without leaving it).
@@ -2041,7 +2169,8 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
     setChatMessages([]);
     setNotes(null);
     setFlashcards([]);
-  }, []);
+    setDiagnosticOpen(false);
+  }, [setDiagnosticOpen]);
 
   const suggestions =
     allTopics.slice(0, 4).map((t) => `Explain ${t}`) ||
@@ -2249,7 +2378,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
               MODES.map((mode) => (
                 <button
                   key={mode.id}
-                  onClick={() => setActiveMode(mode.id)}
+                  onClick={() => { setActiveMode(mode.id); setDiagnosticOpen(false); }}
                   title={mode.label}
                   className={cn(
                     "flex w-10 h-10 shrink-0 items-center justify-center rounded-xl cursor-pointer transition-all duration-150 hover:scale-110 active:scale-[0.95]",
@@ -2292,7 +2421,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
                   {MODES.map((mode) => (
                     <button
                       key={mode.id}
-                      onClick={() => setActiveMode(mode.id)}
+                      onClick={() => { setActiveMode(mode.id); setDiagnosticOpen(false); }}
                       className={cn(
                         "flex w-full items-center gap-3 rounded-2xl px-3 py-2.5 text-left text-xs font-semibold cursor-pointer transition-all duration-150 hover:scale-[1.02] hover:shadow-md border border-transparent",
                         activeMode === mode.id
@@ -2443,7 +2572,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
         </div>
 
         {/* Content Pane */}
-        <div className="flex flex-1 overflow-hidden">
+        <div className="flex flex-1 overflow-hidden relative">
           {!course && !loadError ? (
             /* LOADING: course is still being fetched */
             <div className="flex flex-1 flex-col items-center justify-center px-6 text-center edsynapse-stagger">
@@ -2466,12 +2595,33 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
                 Try again
               </button>
             </div>
-          ) : diagnosticOpen ? (
-            <DiagnosticPanel courseId={courseId!} topics={allTopics} strengthsGaps={strengthsGaps} onClose={() => setDiagnosticOpen(false)} />
-          ) : !studyStarted ? (
+          ) : (
+            <>
+              {/* Diagnostic Panel - always mounted to preserve in-progress state, visually toggled using hidden */}
+              <div className={cn("absolute inset-0 z-20 bg-[#f0f6ff] flex flex-col min-h-0", !diagnosticOpen && "hidden")}>
+                <DiagnosticPanel
+                  courseId={courseId!}
+                  topics={allTopics}
+                  strengthsGaps={strengthsGaps}
+                  isOpen={diagnosticOpen}
+                  onClose={() => setDiagnosticOpen(false)}
+                  phase={diagnosticPhase}
+                  setPhase={setDiagnosticPhase}
+                  quiz={diagnosticQuiz}
+                  setQuiz={setDiagnosticQuiz}
+                  answers={diagnosticAnswers}
+                  setAnswers={setDiagnosticAnswers}
+                  result={diagnosticResult}
+                  setResult={setDiagnosticResult}
+                  error={diagnosticError}
+                  setError={setDiagnosticError}
+                />
+              </div>
+
+              {!studyStarted ? (
             /* PRE-STUDY: Greeting Chat */
             <div className="flex flex-1 flex-col">
-              <div ref={chatRef} className="flex-1 overflow-y-auto px-6 py-8 scrollbar-hide">
+              <div ref={chatRef} className="flex-1 overflow-y-auto px-6 py-8">
                 <div className="mx-auto max-w-xl space-y-8 mt-12">
                   <div className="text-center space-y-3 edsynapse-stagger">
                     <div className="mx-auto flex w-14 h-14 items-center justify-center rounded-2xl bg-gradient-to-tr from-primary to-blue-600 text-white shadow-lg shadow-primary/20">
@@ -2717,7 +2867,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
           ) : (
             /* POST-STUDY: Splitscreen (Notes/Flashcards on left, follow-up chat on right) */
             <div className="flex flex-1 overflow-hidden">
-              <div className="flex-1 overflow-y-auto px-6 py-6 scrollbar-hide">
+              <div className="flex-1 overflow-y-auto px-6 py-6">
                 <div className="mx-auto max-w-2xl">
                   {materialVersions.length > 0 && (
                     <div className="mb-5 flex items-center gap-2 overflow-x-auto pb-1 edsynapse-stagger">
@@ -2904,6 +3054,8 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
                 </div>
               </div>
             </div>
+          )}
+          </>
           )}
         </div>
       </main>

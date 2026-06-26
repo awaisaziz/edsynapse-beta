@@ -9,6 +9,7 @@ import {
   deleteDiscussion,
   updateDiscussionPost,
   deleteDiscussionPost,
+  toggleUpvotePost,
 } from "@/lib/discussions";
 
 export const runtime = "nodejs";
@@ -44,11 +45,11 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const existing = await getDiscussion(courseId, discussionId, { id: user.id, role });
     if (!existing) return NextResponse.json({ error: "Thread not found." }, { status: 404 });
 
-    const body = (await req.json()) as { body?: unknown };
+    const body = (await req.json()) as { body?: unknown; anonymous?: unknown };
     const text = String(body.body ?? "").trim();
     if (!text) return NextResponse.json({ error: "A reply is required." }, { status: 400 });
 
-    await addDiscussionPost({ discussionId, authorId: user.id, body: text.slice(0, 5000) });
+    await addDiscussionPost({ discussionId, authorId: user.id, body: text.slice(0, 5000), anonymous: !!body.anonymous });
 
     const thread = await getDiscussion(courseId, discussionId, { id: user.id, role });
     return NextResponse.json({ thread });
@@ -67,14 +68,18 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     const role = await resolveCourseRole(courseId, user.id);
     if (!isMember(role)) return NextResponse.json({ error: "No access to this course." }, { status: 403 });
 
-    const body = (await req.json()) as { postId?: unknown; title?: unknown; body?: unknown; visibility?: unknown };
+    const body = (await req.json()) as { postId?: unknown; title?: unknown; body?: unknown; visibility?: unknown; upvotePostId?: unknown };
     const postId = typeof body.postId === "string" ? body.postId : null;
+    const upvotePostId = typeof body.upvotePostId === "string" ? body.upvotePostId : null;
 
-    if (postId) {
+    if (upvotePostId) {
+      // Toggle upvote
+      await toggleUpvotePost(upvotePostId, user.id);
+    } else if (postId) {
       // Edit a reply post
       const replyBody = String(body.body ?? "").trim();
       if (!replyBody) return NextResponse.json({ error: "Reply body is required." }, { status: 400 });
-      const ok = await updateDiscussionPost(postId, user.id, replyBody.slice(0, 5000));
+      const ok = await updateDiscussionPost(courseId, discussionId, postId, { id: user.id, role }, replyBody.slice(0, 5000));
       if (!ok) return NextResponse.json({ error: "Failed to update reply (or not authorized)." }, { status: 403 });
     } else {
       // Edit thread

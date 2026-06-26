@@ -12,6 +12,7 @@ import {
   type Assessment,
   type AssessmentQuestion,
   type AttemptDetail,
+  type StrengthsGaps,
 } from "@/lib/edsynapseApi";
 import {
   ArrowLeft,
@@ -65,7 +66,74 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
   const [detail, setDetail] = useState<AttemptDetail | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
 
+  const [strengthsGaps, setStrengthsGaps] = useState<StrengthsGaps | null>(null);
+
   const courseId = course?.id ?? null;
+
+  // Load strengths & gaps whenever courseId or attempts change
+  useEffect(() => {
+    if (!courseId) return;
+    studentApi
+      .getStrengthsGaps(courseId)
+      .then(setStrengthsGaps)
+      .catch(() => setStrengthsGaps(null));
+  }, [courseId, attempts]);
+
+  const getTopicStyle = (topic: string) => {
+    // Only apply colored styling if the student has taken at least 1 attempt
+    if (attempts.length === 0 || !strengthsGaps) {
+      return {
+        card: "border-white/70 bg-white/40 hover:bg-white text-foreground hover:border-primary/20",
+        iconBg: "bg-primary/10 text-primary",
+        arrowColor: "text-primary",
+        badge: null,
+      };
+    }
+
+    const status = strengthsGaps.topics.find(
+      (t) => t.topic.toLowerCase() === topic.toLowerCase()
+    );
+
+    if (!status) {
+      return {
+        card: "border-white/70 bg-white/40 hover:bg-white text-foreground hover:border-primary/20",
+        iconBg: "bg-primary/10 text-primary",
+        arrowColor: "text-primary",
+        badge: null,
+      };
+    }
+
+    switch (status.level) {
+      case "strong":
+        return {
+          card: "border-emerald-500/25 bg-emerald-500/10 hover:bg-emerald-500/15 text-emerald-950 hover:border-emerald-500/40",
+          iconBg: "bg-emerald-500/20 text-emerald-700",
+          arrowColor: "text-emerald-700",
+          badge: "Strong",
+        };
+      case "moderate":
+        return {
+          card: "border-amber-500/25 bg-amber-500/10 hover:bg-amber-500/15 text-amber-950 hover:border-amber-500/40",
+          iconBg: "bg-amber-500/20 text-amber-700",
+          arrowColor: "text-amber-700",
+          badge: "Moderate",
+        };
+      case "needs_improvement":
+        return {
+          card: "border-rose-500/25 bg-rose-500/10 hover:bg-rose-500/15 text-rose-950 hover:border-rose-500/40",
+          iconBg: "bg-rose-500/20 text-rose-700",
+          arrowColor: "text-rose-700",
+          badge: "Needs Focus",
+        };
+      default:
+        return {
+          card: "border-white/70 bg-white/40 hover:bg-white text-foreground hover:border-primary/20",
+          iconBg: "bg-primary/10 text-primary",
+          arrowColor: "text-primary",
+          badge: null,
+        };
+    }
+  };
   // Assessment topics come only from PUBLISHED lessons/weeks — a student is
   // assessed on what the teacher has released. Across all published weeks, e.g.
   // week 1 (4 topics) + week 2 (3 topics) = 7 topics here. Dedupe because the
@@ -286,22 +354,32 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
                   </button>
                 )}
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                  {topics.map((topic) => (
-                    <button
-                      key={topic}
-                      type="button"
-                      onClick={() => startNewAssessment(topic)}
-                      className="flex items-center justify-between gap-2 p-3.5 rounded-2xl border border-white/70 bg-white/40 hover:bg-white text-left transition-all active:scale-[0.98] shadow-sm"
-                    >
-                      <span className="flex items-center gap-2.5 min-w-0">
-                        <span className="flex w-8 h-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                          <BookOpen className="w-4 h-4" />
+                  {topics.map((topic) => {
+                    const style = getTopicStyle(topic);
+                    return (
+                      <button
+                        key={topic}
+                        type="button"
+                        onClick={() => startNewAssessment(topic)}
+                        className={`flex items-center justify-between gap-2 p-3.5 rounded-2xl border text-left transition-all active:scale-[0.98] shadow-sm ${style.card}`}
+                      >
+                        <span className="flex items-center gap-2.5 min-w-0">
+                          <span className={`flex w-8 h-8 shrink-0 items-center justify-center rounded-lg ${style.iconBg}`}>
+                            <BookOpen className="w-4 h-4" />
+                          </span>
+                          <span className="min-w-0">
+                            <span className="block truncate text-xs font-bold">{topic}</span>
+                            {style.badge && (
+                              <span className="inline-block mt-0.5 text-[9px] font-extrabold uppercase tracking-wider opacity-75">
+                                {style.badge}
+                              </span>
+                            )}
+                          </span>
                         </span>
-                        <span className="truncate text-xs font-bold text-foreground">{topic}</span>
-                      </span>
-                      <ArrowRight className="w-4 h-4 shrink-0 text-primary" />
-                    </button>
-                  ))}
+                        <ArrowRight className={`w-4 h-4 shrink-0 ${style.arrowColor}`} />
+                      </button>
+                    );
+                  })}
                 </div>
                 </>
               )}
@@ -353,7 +431,10 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
 
                           <div className="min-w-0 flex-1">
                             <p className="text-sm font-bold text-foreground font-display truncate">
-                              {a.topic || `Attempt ${attempts.length - i}`}
+                              {(() => {
+                                const topics = a.topic ? a.topic.split(",").map(t => t.trim()).filter(Boolean) : [];
+                                return topics.length > 1 ? `${topics[0]} +${topics.length - 1} more` : a.topic || `Attempt ${attempts.length - i}`;
+                              })()}
                             </p>
                             <p className="text-[11px] text-muted-foreground">
                               {new Date(a.created_at).toLocaleDateString(undefined, {
@@ -402,6 +483,18 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
                                     View report
                                   </Link>
                                 </div>
+                                {a.topic && (
+                                  <div className="flex flex-wrap gap-1.5 bg-white/40 p-3 rounded-2xl border border-primary/5">
+                                    <div className="w-full text-[10px] font-bold uppercase tracking-wider text-muted-foreground mb-1">
+                                      Topics Covered
+                                    </div>
+                                    {a.topic.split(",").map((t) => t.trim()).filter(Boolean).map((t, idx) => (
+                                      <span key={idx} className="inline-flex items-center rounded-lg bg-primary/10 border border-primary/15 px-2 py-0.5 text-[10px] font-semibold text-primary">
+                                        {t}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
                                 {detail.review.map((r, idx) => (
                                   <QuizCard
                                     key={r.question_id}

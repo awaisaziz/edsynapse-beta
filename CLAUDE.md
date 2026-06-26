@@ -16,7 +16,7 @@ See [`PRD.md`](PRD.md) for the product spec,
 
 - **Teacher** — creates courses (with a join code) + lessons, uploads authentic
   source material (chunked + embedded for RAG), views a cohort analytics
-  dashboard, invites teaching assistants.
+  dashboard.
 - **Student** — joins a teacher's course by code *or* self-uploads material to
   create a personal `self_study` course; runs the loop
   **Diagnose → Teach+Check → Verify** with subject cards and a personal knowledge map.
@@ -126,7 +126,7 @@ step), `sessions`, `courses` (`kind class|self_study`, unique join
 `source_chunks` (`vector(1536)` + ivfflat cosine index), `knowledge_states`
 (unique per `student+course+topic`, level `strong|moderate|needs_improvement`),
 `quiz_attempts` (`kind diagnostic|assessment`), `tutor_sessions`.
-Admin/support: `support_threads`, `support_messages`, `course_assistants`.
+Admin/support: `support_threads`, `support_messages`.
 
 ## Commands
 

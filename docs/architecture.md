@@ -141,7 +141,7 @@ one vector workload (content RAG); everything else is plain relational state.
 | **Content RAG** | The authentic material, chunked (~1200 chars, 150 overlap) and embedded | `source_chunks` — `vector(1536)`, ivfflat cosine index | Per course |
 | **Conversation history** | Recent turns for this student + course + topic (last 8 sent to the model, last 20 persisted) | `tutor_sessions.messages` (JSONB) | Across sessions on that topic |
 | **Durable tutor memory** | A rolling 3-sentence summary + ≤8 stable facts about the learner (what they grasp, struggle with, goals) — survives a chat "reset" | `tutor_sessions.memory` (JSONB) | Durable per student+course+topic; refreshed by an LLM consolidation pass after each turn |
-| **Knowledge map** | Mastery per topic — `strong` / `moderate` / `needs_improvement` + evidence | `knowledge_states` (unique per student+course+topic) | Durable; updated by grading |
+| **Strengths & Gaps** | Mastery per topic — `strong` / `moderate` / `needs_improvement` + evidence | `knowledge_states` (unique per student+course+topic) | Durable; updated by grading |
 | **Learning preferences** | Modality (text / visual / audio) + pace (methodical / deep) | Client UI state, sent per request | Per session (not persisted) |
 
 ```mermaid
@@ -166,11 +166,11 @@ flowchart TB
     PERSIST -. writes .-> DB
 ```
 
-**The knowledge map updates on a separate path** — not from tutor chat, but from
+**The strengths & gaps map updates on a separate path** — not from tutor chat, but from
 **graded quizzes**. The diagnostic quiz seeds it, and each verify-stage
 assessment grade upserts the relevant topic's mastery level
 (`src/lib/knowledge.ts` → `scoreToLevel` / `upsertKnowledgeState`). That map then
-drives what the student sees in their personal knowledge map and the teacher's
+drives what the student sees in their personal strengths & gaps view and the teacher's
 cohort analytics.
 
 After each turn the tutor route runs a small, non-blocking **LLM consolidation
@@ -190,117 +190,68 @@ learner even after the visible conversation is cleared.
 
 ---
 
-## 4. Conversational surfaces — three distinct chatbots
+## 4. Conversational and Collaborative surfaces — three distinct chatbots + Q&A Board
 
 The student class workspace (`/student/class/[code]`) is organised behind a
-**horizontal navbar with four tabs — Course · Learning · Chat · Discussion**.
-One tab (**Course**) is a read-only material browser; the other three are
-LLM-driven chat surfaces, each with a different job, scope, and retrieval
-strategy. All three stream over the same NDJSON-over-`fetch` transport
-(`data: {json}` lines: `sources` → `delta`s → `done`) and persist to the single
-`tutor_sessions` table, disambiguated by the `topic` column.
+horizontal navbar with five tabs — Course · Learning · AI Tutor · Socratic AI · Q&A Board.
+One tab (**Course**) is a read-only material browser, and the **Q&A Board** is a collaborative forum.
+The other three tabs are LLM-driven chat surfaces, each with a different pedagogical role, scope, and retrieval strategy. All three bots stream over the same NDJSON-over-`fetch` transport (`data: {json}` lines: `sources` → `delta`s → `done`) and persist to the single `tutor_sessions` table, disambiguated by the `topic` column.
 
-| Surface (tab) | Route | Scope | Retrieval | `topic` key | Output style |
+| Surface (tab) | Route | Scope | Retrieval | `topic` key prefix | Output style |
 |---------------|-------|-------|-----------|-------------|--------------|
-| **Per-topic Tutor** (Learning) | `/api/student/tutor/stream` | One syllabus topic | Content RAG (cosine top-k) + history + durable memory | the topic name | Teaches — explains, checks understanding mid-stream |
-| **Course Chat** (Chat) | `/api/student/tutor/stream` | Whole course (free-form Q&A) | Content RAG (cosine top-k) + history | `__course_chat__` | Answers — direct, grounded explanations |
-| **Socratic Discussion** (Discussion) | `/api/student/discussion/stream` | Whole course | Content RAG (cosine recall) **+ LLM re-ranker** | `__discussion__` | Socratic — asks questions, probes overall grasp |
+| **Per-topic Tutor** (Learning) | `/api/student/tutor/stream` | One syllabus topic (inline study) | Content RAG (cosine top-k) + history + durable memory | the topic name (no prefix) | Teaches — explains, checks understanding mid-stream |
+| **AI Tutor** (AI Tutor) | `/api/student/tutor/stream` | Whole course (free-form Q&A) | Content RAG (cosine top-k) + history | `__tutor__:<nanoid>` | Answers — direct, grounded explanations |
+| **Socratic AI** (Socratic AI) | `/api/student/socratic/stream` | Whole course (dialogue) | Content RAG (cosine top-k) + history | `__socr__:<nanoid>` | Socratic — asks questions, probes overall grasp, guides to discovery |
 
-**How one route serves two surfaces.** The Per-topic Tutor and Course Chat share
-`/api/student/tutor/stream` — the route has no notion of "which surface." The
-client decides by what it sends in the POST body:
+**Thread isolation and prefixing.** To prevent thread collisions in the shared `tutor_sessions` table, the API route [conversations/route.ts](file:///d:/Semester_3_summer_%282026%29/Coding%20Projects/edsynapse-beta/frontend/src/app/api/student/conversations/route.ts) prefixes thread persistence keys (`tutor_sessions.topic`) based on the surface:
+- **AI Tutor**: Prefixed with `__tutor__:` (e.g. `__tutor__:<nanoid>`).
+- **Socratic AI**: Prefixed with `__socr__:` (e.g. `__socr__:<nanoid>`).
 
-- **`topic`** — the human-readable subject, used for the retrieval query *and* the
-  system prompt. The Per-topic Tutor sends the syllabus topic (e.g.
-  `"Photosynthesis"`); the Course Chat sends the course name.
-- **`topic_key`** — the persistence key (`tutor_sessions.topic`), defaulting to
-  `topic`. The Course Chat overrides it with the sentinel `__course_chat__` so its
-  history is stored separately *without* that sentinel leaking into the prompt or
-  the embedding query. The Per-topic Tutor omits it, so its key is just the topic.
+These prefixes keep each chatbot's saved threads separated. During a streaming turn, the API handler maps the request's human-readable `topic` (the course name) for prompt generation and embedding queries, but uses the prefixed `topic_key` for DB session lookup and updates.
 
-This `topic` / `topic_key` split is the whole distinction: same route, same
-engine, different conversation scope and storage bucket. The Socratic Discussion
-uses its own route (`/api/student/discussion/stream`) and the reserved
-`__discussion__` key. No schema change was needed for any of this.
+### 4.1 Per-topic Tutor and Course-wide AI Tutor (the teaching engine)
 
-### 4.1 Per-topic Tutor and Course Chat (the teaching engine)
+Both run on the same engine (`streamTutorReply` ➔ tutor stream route, see §2–§3). The **Per-topic Tutor** is scoped to a single lesson topic and is used inline inside the Learning study workspace. The **AI Tutor** tab points that exact same engine at the *whole course* (using the course name as `topic` and `__tutor__:<nanoid>` as the persistence key) for free-form "explain anything in this course" Q&A. Output is explanatory and may emit mid-stream comprehension-check prompts.
 
-Both run on the same engine (`streamTutorReply` → tutor stream route, see §2–§3).
-The **Per-topic Tutor** is scoped to a single lesson topic and is the surface
-used inside the Learning study workspace. The **Course Chat** tab points that
-exact same engine at the *whole course* (keyed `__course_chat__`) for free-form
-"explain anything in this course" Q&A. Output is explanatory and may emit
-mid-stream comprehension-check prompts.
+### 4.2 Socratic AI (Socratic dialogues)
 
-### 4.2 Socratic Discussion (assessment through dialogue)
-
-The Discussion tab is a **separate** chatbot whose goal is not to teach a topic
-but to **assess and deepen the learner's overall understanding of the entire
-course through dialogue**. It differs from the tutor in two architectural ways:
-
-**(a) It is Socratic by construction.** Its system prompt (`streamDiscussionReply`
-in `src/lib/llm.ts`) forbids lecturing: it leads with one focused question at a
-time, builds on the learner's previous answer, acknowledges what was correct then
-surfaces a gap with another question, keeps turns short (2–4 sentences) and always
-ends on a question, and offers a small hint only when the learner is stuck. It is
-told the re-ranked course material is the **only** scope for the conversation.
-
-**(b) Retrieval adds a re-ranking stage.** Instead of using raw cosine order, the
-discussion bot runs a two-stage **retrieve → re-rank** pipeline
-(`retrieveReranked` in `src/lib/rag.ts`, surfaced as `rerankedContext`):
-
-1. **Stage 1 — cosine recall.** Pull a wide candidate set (~18 chunks, ≈3× the
-   final `k`) from `source_chunks` by ivfflat cosine similarity.
-2. **Stage 2 — LLM re-rank.** A single zero-temperature JSON call scores each
-   candidate 0–10 for relevance to the learner's latest message; candidates are
-   re-sorted by score and only the top-`k` survive. On any failure it falls back
-   to plain cosine order, so the surface degrades gracefully.
-3. The surviving top-`k` chunks are the entire grounding context handed to the
-   Socratic prompt.
-
-This is a lightweight, infra-free analogue of a cross-encoder re-ranker: the
-recall stage favours breadth (cheap vector search), the re-rank stage favours
-precision (the model judges true relevance) — sharpening what the bot quizzes the
-learner on.
+The Socratic AI tab is a dedicated chatbot whose goal is to **assess and deepen the learner's overall understanding of the entire course through dialogue**.
+- **Pedagogy**: Its system prompt (`streamSocraticReply` in `src/lib/llm.ts`) forbids lecturing. Instead, it asks probing questions to challenge assumptions, exposes logic gaps, and guides students to discover concepts for themselves.
+- **Route**: It streams tokens via `/api/student/socratic/stream` (using `__socr__:<nanoid>` as the persistence key).
 
 ```mermaid
 sequenceDiagram
-    participant S as Student (Discussion tab)
-    participant F as Serverless Function (/api/student/discussion/stream)
+    participant S as Student (Socratic AI tab)
+    participant F as Serverless Function (/api/student/socratic/stream)
     participant DB as AWS Aurora + pgvector
     participant AI as OpenAI
 
     S->>F: POST message + course_id + course_name
     F->>AI: embed(message)  [text-embedding-3-small]
     AI-->>F: query embedding
-    F->>DB: stage 1 — cosine recall ~18 candidate chunks (ivfflat `<=>`)
-    DB-->>F: candidate chunks
-    F->>AI: stage 2 — re-rank (score each 0-10, JSON, temperature 0)
-    AI-->>F: relevance scores
-    F->>F: re-sort by score, keep top-k (cosine fallback on failure)
-    F->>DB: load discussion history (tutor_sessions, topic __discussion__)
-    DB-->>F: prior turns (last 30)
+    F->>DB: Content RAG — top-k source_chunks (cosine `<=>`, ivfflat)
+    DB-->>F: grounded chunks + citations
+    F->>DB: load socratic history (tutor_sessions, topic __socr__:<id>)
+    DB-->>F: prior turns (last 20)
     F-->>S: SSE `sources` event
     F->>AI: stream Socratic chat (questions only, scoped to top-k material)
     AI-->>F: token stream
     F-->>S: SSE token deltas, then `done`
-    F->>DB: persist turn (append to tutor_sessions.messages, keep last 30)
+    F->>DB: persist turn (append to tutor_sessions.messages, keep last 20)
 ```
 
-**Persistence.** One rolling conversation per student+course is stored under
-`topic = __discussion__` in `tutor_sessions.messages` (last 30 turns). It is
-loaded/cleared via `GET`/`DELETE /api/student/discussion/history`. Re-ranking is
-recomputed per turn; the discussion bot does not run the tutor's memory
-consolidation pass.
+**Persistence.** One rolling conversation thread per student+course is stored under a `topicKey` prefixed with `__socr__:` in `tutor_sessions.messages`. Thread management (renaming, deleting, listing) is handled via `GET`/`PATCH`/`DELETE /api/student/conversations`.
 
-### 4.3 Course tab (material browser, not a bot)
+### 4.3 Q&A Board (Collaborative discussion forum)
 
-The fourth tab lists every uploaded source for the course (grouped by lesson) and
-can preview a file's extracted text via `GET /api/courses/[id]/sources/[sourceId]`.
-It surfaces exactly the material that grounds all three chatbots above. A
-**Diagnostic Test** launcher also lives in the Learning workspace, running the
-course-wide diagnostic (`/api/student/diagnose/{quiz,evaluate}`) inline and
-seeding the knowledge map.
+The **Q&A Board** tab hosts a collaborative, Piazza-style course discussion board ([DiscussionBoard.tsx](file:///d:/Semester_3_summer_%282026%29/Coding%20Projects/edsynapse-beta/frontend/src/components/ui/DiscussionBoard.tsx)).
+- It allows students and teachers to create public or private discussion threads.
+- It supports threaded comments, markdown rendering, and student/teacher badges.
+- All data flows through the `/api/student/discussion/*` and `/api/teacher/courses/[id]/discussion/*` endpoints, keeping peer-to-peer discussions separate from AI tutor sessions.
+
+### 4.4 Course tab (material browser, not a bot)
+
+The fifth tab lists every uploaded source for the course (grouped by lesson) and can preview a file's extracted text via `GET /api/courses/[id]/sources/[sourceId]`. It surfaces exactly the material that grounds all three chatbots above. A **Diagnostic Test** launcher also lives in the Learning workspace, running the course-wide diagnostic (`/api/student/diagnose/{quiz,evaluate}`) inline and seeding the knowledge map.
 
 ---
 
@@ -348,21 +299,20 @@ seeding the knowledge map.
    (`src/lib/rag.ts`), embedded via **OpenAI**, and stored as `vector(1536)`
    rows in `source_chunks` for grounding.
 3. **Diagnose.** An OpenAI-generated diagnostic quiz seeds a per-student
-   **knowledge map** (`knowledge_states`: strong / moderate / needs-improvement).
+    **strengths & gaps** map (`knowledge_states`: strong / moderate / needs-improvement).
 4. **Teach + Check (the loop).** The streaming tutor grounds each turn in
-   **content RAG** + **recent conversation history** + **durable memory**, teaches
-   in the student's chosen modality/pace, and checks understanding mid-explanation
-   (see §2–§3). The student can also generate grounded smart notes and flashcards
-   for a topic. The class workspace exposes this behind a four-tab navbar —
-   **Course** (material browser), **Learning** (the study workspace + inline
-   diagnostic), **Chat** (whole-course Q&A tutor), and **Discussion** (the Socratic
-   re-ranked assessment bot) — detailed in §4.
+    **content RAG** + **recent conversation history** + **durable memory**, teaches
+    in the student's chosen modality/pace, and checks understanding mid-explanation
+    (see §2–§3). The student can also generate grounded smart notes and flashcards
+    for a topic. The class workspace exposes this behind a five-tab navbar —
+    **Course** (material browser), **Learning** (study workspace + inline diagnostic),
+    **AI Tutor** (explanatory Q&A bot), **Socratic AI** (dialogue bot), and
+    **Q&A Board** (peer-to-peer forum) — detailed in §4.
 5. **Verify.** A low-stakes assessment (MCQ + short answer) is auto-graded by
-   OpenAI; results upsert the knowledge map, sharpening the next loop.
+    OpenAI; results upsert the strengths & gaps map, sharpening the next loop.
 6. **Admin.** The admin console: a user directory (suspend / reactivate), course
-   oversight, and a support inbox of admin ↔ user threads
-   (`support_threads` / `support_messages`). Teachers can also invite teaching
-   assistants (`course_assistants`).
+    oversight, and a support inbox of admin ↔ user threads (`support_threads` /
+    `support_messages`).
 7. **Feedback (beta).** A **Feedback** link in the landing nav and a **Share
    Feedback** link in the student/teacher app shell open a Google Form in a new
    tab (`NEXT_PUBLIC_FEEDBACK_URL`, `src/lib/feedback.ts`) so beta users — both

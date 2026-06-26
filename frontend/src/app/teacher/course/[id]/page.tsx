@@ -918,7 +918,12 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
                                       className="flex w-full items-center gap-3 rounded-2xl border border-white/70 bg-white/55 px-3.5 py-2.5 text-left transition hover:border-primary/25 hover:bg-white active:scale-[0.99]"
                                     >
                                       <div className="min-w-0 flex-1">
-                                        <p className="truncate text-xs font-bold text-foreground">{a.topic || "Untitled"}</p>
+                                        <p className="truncate text-xs font-bold text-foreground">
+                                          {(() => {
+                                            const topics = a.topic ? a.topic.split(",").map(t => t.trim()).filter(Boolean) : [];
+                                            return topics.length > 1 ? `${topics[0]} +${topics.length - 1} more` : a.topic || "Untitled";
+                                          })()}
+                                        </p>
                                         <p className="text-[10px] text-muted-foreground capitalize">{a.kind} · {relativeTime(a.created_at)}</p>
                                       </div>
                                       <span className="shrink-0 text-[12px] font-black" style={{ color: pct >= 75 ? LEVEL_TONE.strong : pct >= 45 ? LEVEL_TONE.moderate : LEVEL_TONE.needs_improvement }}>
@@ -967,9 +972,19 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
             <div className="flex items-center justify-between gap-3 border-b border-black/5 px-6 py-4">
               <div className="min-w-0">
                 <p className="text-[10px] font-extrabold uppercase tracking-wider text-primary">Read-only report</p>
-                <h2 className="truncate text-lg font-bold font-display text-foreground">{reviewAttempt?.topic ?? "Loading…"}</h2>
+                {reviewAttempt?.topic ? (
+                  <div className="flex flex-wrap gap-1.5 mt-1.5 max-h-20 overflow-y-auto pr-1 scrollbar-hide">
+                    {reviewAttempt.topic.split(",").map((t) => t.trim()).filter(Boolean).map((t, idx) => (
+                      <span key={idx} className="inline-flex items-center rounded-lg bg-primary/10 border border-primary/15 px-2 py-0.5 text-[11px] font-semibold text-primary">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                ) : (
+                  <h2 className="text-lg font-bold font-display text-foreground">Loading…</h2>
+                )}
                 {reviewAttempt && (
-                  <p className="text-[11px] text-muted-foreground">
+                  <p className="text-[11px] text-muted-foreground mt-1.5">
                     Score {reviewAttempt.score}/{reviewAttempt.total} · {relativeTime(reviewAttempt.created_at)}
                   </p>
                 )}

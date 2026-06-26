@@ -13,6 +13,7 @@ import {
   TrendingUp,
   AlertTriangle,
   ArrowDownUp,
+  Trophy,
 } from "lucide-react";
 
 const LEVEL_SCORE: Record<TopicMastery, number> = {
@@ -92,7 +93,7 @@ function StrengthsGapsInner() {
     return weakestFirst ? byScore : byScore.reverse();
   }, [topics, weakestFirst]);
 
-  const handleAction = (topicId: string, actionType: "tutor" | "quiz" | "review") => {
+  const handleAction = (topicId: string, actionType: "tutor" | "quiz" | "review" | "assessment") => {
     const topic = topics.find((t) => t.id === topicId);
     if (!topic || !activeCourse) return;
     const code = activeCourse.code;
@@ -103,6 +104,8 @@ function StrengthsGapsInner() {
       router.push(`/student/class/${code}/quiz?topic=${queryTopic}`);
     } else if (actionType === "review") {
       router.push(`/student/class/${code}?tab=notes&topic=${queryTopic}`);
+    } else if (actionType === "assessment") {
+      router.push(`/student/class/${code}/assessment`);
     }
   };
 
@@ -235,6 +238,15 @@ function StrengthsGapsInner() {
                       className="flex items-center gap-1 text-xs font-bold px-4 py-3 bg-white/60 hover:bg-white text-foreground rounded-2xl border border-primary/10 active:scale-[0.98] transition-all"
                     >
                       <span>Take Diagnostic Quiz</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => handleAction(recommendedTopic.id, "assessment")}
+                      className="flex items-center gap-1.5 text-xs font-bold px-4 py-3 bg-emerald-500/5 hover:bg-emerald-500/10 text-emerald-700 rounded-2xl border border-emerald-500/20 active:scale-[0.98] transition-all"
+                    >
+                      <Trophy className="w-4 h-4 shrink-0 text-emerald-600" />
+                      <span>Take Assessment</span>
                     </button>
                   </div>
                 </div>

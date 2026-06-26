@@ -1,4 +1,4 @@
--- 002 — Admin console, support threads, and teaching assistants.
+-- 002 — Admin console and support threads.
 -- Additive + idempotent (safe to re-run). Builds on 001-init-schema.sql.
 
 -- ── Users: admin role + account status ───────────────────────────────────────
@@ -31,15 +31,3 @@ CREATE TABLE IF NOT EXISTS support_messages (
 );
 CREATE INDEX IF NOT EXISTS idx_support_messages_thread ON support_messages(thread_id);
 
--- ── Teaching assistants (co-teacher access to a course) ───────────────────────
-CREATE TABLE IF NOT EXISTS course_assistants (
-  id         text PRIMARY KEY,
-  course_id  text NOT NULL REFERENCES courses(id) ON DELETE CASCADE,
-  user_id    text REFERENCES users(id) ON DELETE SET NULL, -- null until the invitee has an account
-  email      varchar(255) NOT NULL,
-  status     varchar(10) NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'active')),
-  invited_at timestamptz NOT NULL DEFAULT now(),
-  UNIQUE (course_id, email)
-);
-CREATE INDEX IF NOT EXISTS idx_course_assistants_course ON course_assistants(course_id);
-CREATE INDEX IF NOT EXISTS idx_course_assistants_user ON course_assistants(user_id);

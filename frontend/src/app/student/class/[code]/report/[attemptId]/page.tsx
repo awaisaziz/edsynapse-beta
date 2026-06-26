@@ -107,16 +107,27 @@ export default function AttemptReportPage({
           <div className="inline-flex p-4 rounded-3xl bg-amber-500/10 text-amber-500 border border-amber-500/20">
             <Trophy className="w-12 h-12" />
           </div>
-          <div className="space-y-2">
+          <div className="space-y-3">
             <h1 className="text-3xl font-black text-foreground font-display tracking-tight">Assessment Report</h1>
-            <p className="text-sm text-muted-foreground max-w-md mx-auto">
-              How you did on <span className="font-bold">{detail.topic}</span> ·{" "}
-              {new Date(detail.created_at).toLocaleDateString(undefined, {
-                month: "short",
-                day: "numeric",
-                year: "numeric",
-              })}
-            </p>
+            <div className="flex flex-col items-center gap-2">
+              <span className="text-xs font-semibold text-muted-foreground">
+                How you did on{" "}
+                {new Date(detail.created_at).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
+              </span>
+              {detail.topic ? (
+                <div className="flex flex-wrap items-center justify-center gap-1.5 max-w-xl mx-auto">
+                  {detail.topic.split(",").map((t) => t.trim()).filter(Boolean).map((t, idx) => (
+                    <span key={idx} className="inline-flex items-center rounded-lg bg-primary/10 border border-primary/15 px-2.5 py-0.5 text-xs font-semibold text-primary">
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
+            </div>
           </div>
         </div>
 
@@ -144,9 +155,17 @@ export default function AttemptReportPage({
               >
                 {passed ? <CheckCircle2 className="w-6 h-6" /> : <XCircle className="w-6 h-6" />}
               </div>
-              <div>
+              <div className="min-w-0 flex-1">
                 <h3 className="text-lg font-bold text-foreground font-display">{passed ? "Passed" : "Keep practicing"}</h3>
-                <p className="text-xs text-muted-foreground">Topic: {detail.topic}</p>
+                {detail.topic ? (
+                  <div className="flex flex-wrap gap-1 mt-1.5 max-h-24 overflow-y-auto pr-1 scrollbar-hide">
+                    {detail.topic.split(",").map((t) => t.trim()).filter(Boolean).map((t, idx) => (
+                      <span key={idx} className="inline-flex items-center rounded-md bg-primary/10 border border-primary/15 px-1.5 py-0.5 text-[10px] font-semibold text-primary truncate max-w-full">
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
             </div>
           </div>

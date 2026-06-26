@@ -7,7 +7,7 @@ import { StrengthsGapsTopic, TopicMastery } from "@/lib/strengthsGaps";
 
 interface StrengthsGapsChartProps {
   topics: StrengthsGapsTopic[];
-  onAction?: (topicId: string, actionType: "tutor" | "quiz" | "review") => void;
+  onAction?: (topicId: string, actionType: "tutor" | "quiz" | "review" | "assessment") => void;
   showActions?: boolean;
   className?: string;
 }

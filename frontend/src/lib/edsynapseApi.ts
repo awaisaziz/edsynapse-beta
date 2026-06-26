@@ -64,7 +64,7 @@ export interface TopicStatus {
   evidence: string;
 }
 
-export interface KnowledgeMap {
+export interface StrengthsGaps {
   student_id: string;
   topics: TopicStatus[];
   overall_mastery: number;
@@ -152,7 +152,7 @@ export interface GradeReport {
     rationale: string;
   }[];
   updated_status: TopicStatus;
-  knowledge_map: KnowledgeMap;
+  knowledge_map: StrengthsGaps;
 }
 
 export interface AttemptReviewItem {
@@ -282,6 +282,9 @@ export const studentApi = {
   addSource: (courseId: string, form: FormData) =>
     postForm<{ sources: IngestedSource[]; topics: string[] }>(`/courses/${courseId}/sources`, form),
 
+  deleteSource: (courseId: string, sourceId: string) =>
+    del<{ ok: true }>(`/courses/${courseId}/sources/${sourceId}`),
+
   // All uploaded source material for a course (Course tab).
   listSources: (courseId: string) =>
     get<{ sources: { id: string; title: string; type: string; lesson_id: string | null }[] }>(
@@ -303,18 +306,18 @@ export const studentApi = {
   attachSourceToLesson: (courseId: string, sourceId: string, lessonId: string) =>
     post<{ topics: string[] }>(`/courses/${courseId}/sources/${sourceId}/attach`, { lessonId }),
 
-  diagnoseQuiz: (courseId: string, topics: string[]) =>
-    post<DiagnosticQuiz>("/student/diagnose/quiz", { course_id: courseId, topics }),
+  diagnoseQuiz: (courseId: string, topics: string[], weakTopics: string[] = []) =>
+    post<DiagnosticQuiz>("/student/diagnose/quiz", { course_id: courseId, topics, weak_topics: weakTopics }),
 
   diagnoseEvaluate: (
     courseId: string,
     topics: string[],
     questions: DiagnosticQuestion[],
     answers: { question_id: string; selected_label: string }[],
-  ) => post<KnowledgeMap>("/student/diagnose/evaluate", { course_id: courseId, topics, questions, answers }),
+  ) => post<StrengthsGaps>("/student/diagnose/evaluate", { course_id: courseId, topics, questions, answers }),
 
-  getKnowledgeMap: (courseId?: string) =>
-    get<KnowledgeMap>(`/student/knowledge-map${courseId ? `?course_id=${courseId}` : ""}`),
+  getStrengthsGaps: (courseId?: string) =>
+    get<StrengthsGaps>(`/student/strengths-gaps${courseId ? `?course_id=${courseId}` : ""}`),
 
   generateNotes: (courseId: string, topic: string) =>
     post<SmartNotes>("/student/notes", { course_id: courseId, topic }),
@@ -409,18 +412,55 @@ export const studentApi = {
     }
   },
 
+  async *socraticStreamFetch(
+    courseId: string,
+    topic: string,
+    message: string,
+    history: { role: "user" | "assistant"; content: string }[] = [],
+    profile: LearningProfile = { modality: "text", pace: "methodical" },
+    signal?: AbortSignal,
+    topicKey?: string,
+  ): AsyncGenerator<{ type: string; [k: string]: unknown }> {
+    const res = await fetch(`${BASE}/api/student/socratic/stream`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ course_id: courseId, topic, message, history, profile, topic_key: topicKey ?? topic }),
+      credentials: "include",
+      signal,
+    });
+    if (!res.ok) throw new Error(`Socratic stream failed: ${res.status}`);
+    const reader = res.body!.getReader();
+    const decoder = new TextDecoder();
+    let buf = "";
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buf += decoder.decode(value, { stream: true });
+      const lines = buf.split("\n");
+      buf = lines.pop() ?? "";
+      for (const line of lines) {
+        if (line.startsWith("data: ")) {
+          try {
+            yield JSON.parse(line.slice(6));
+          } catch {}
+        }
+      }
+    }
+  },
+
   // ── Saved conversation threads (Chat + Discussion tabs) ──────────────────────
-  listConversations: (courseId: string, surface: "chat" | "discussion") =>
+  listConversations: (courseId: string, surface: "chat" | "tutor" | "socratic" | "discussion") =>
     get<{ threads: { topic: string; title: string; updatedAt: string; preview: string }[] }>(
       `/student/conversations?course_id=${encodeURIComponent(courseId)}&surface=${surface}`,
     ),
 
-  createConversation: (courseId: string, surface: "chat" | "discussion", title?: string) =>
+  createConversation: (courseId: string, surface: "chat" | "tutor" | "socratic" | "discussion", title?: string) =>
     post<{ thread: { topic: string; title: string; updatedAt: string; preview: string } }>("/student/conversations", {
       course_id: courseId,
       surface,
       title,
     }),
+
 
   renameConversation: (courseId: string, topic: string, title: string) =>
     patch<{ ok: boolean }>("/student/conversations", { course_id: courseId, topic, title }),
@@ -481,15 +521,6 @@ export interface CourseAnalytics {
   topics: { topic: string; level: string; n: string }[];
 }
 
-export interface Assistant {
-  /** The assistant's user id — TAs are enrolled members promoted in place. */
-  id: string;
-  name: string;
-  email: string;
-  initials: string;
-  status: "active";
-}
-
 export const teacherApi = {
   listCourses: () => get<{ courses: Course[] }>("/teacher/courses"),
 
@@ -532,6 +563,9 @@ export const teacherApi = {
       { published },
     ),
 
+  deleteSource: (courseId: string, sourceId: string) =>
+    del<{ ok: true }>(`/courses/${courseId}/sources/${sourceId}`),
+
   getAnalytics: (courseId: string) => get<CourseAnalytics>(`/teacher/courses/${courseId}/analytics`),
 
   // Read-only record of one enrolled student: attempt history + per-topic mastery.
@@ -543,24 +577,16 @@ export const teacherApi = {
   getStudentAttempt: (courseId: string, studentId: string, attemptId: string) =>
     get<AttemptDetail>(`/teacher/courses/${courseId}/students/${studentId}/attempts/${attemptId}`),
 
-  listAssistants: (courseId: string) =>
-    get<{ assistants: Assistant[] }>(`/teacher/courses/${courseId}/assistants`),
-
-  // Promote an enrolled member to teaching assistant (course-scoped teacher
-  // access). They must already have joined the course with the class code.
-  promoteAssistant: (courseId: string, userId: string) =>
-    post<{ assistants: Assistant[] }>(`/teacher/courses/${courseId}/assistants`, { userId }),
-
-  // Demote a TA back to a regular student (they stay enrolled).
-  removeAssistant: (courseId: string, userId: string) =>
-    del<{ assistants: Assistant[] }>(`/teacher/courses/${courseId}/assistants?userId=${userId}`),
+  // Unenroll a student from the course entirely. Owner-only action.
+  removeStudent: (courseId: string, studentId: string) =>
+    del<{ ok: true }>(`/teacher/courses/${courseId}/students/${studentId}`),
 };
 
 // ── Discussion board (shared by teacher + student) ───────────────────────────
 
 export type DiscussionVisibility = "public" | "private";
-export type DiscussionAuthorRole = "teacher" | "ta" | "student";
-export type CourseRole = "owner" | "ta" | "student" | "none";
+export type DiscussionAuthorRole = "teacher" | "student";
+export type CourseRole = "owner" | "student" | "none";
 
 export interface DiscussionAuthor {
   id: string;

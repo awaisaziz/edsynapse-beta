@@ -15,9 +15,8 @@ and [`PRD.md`](../PRD.md) for the product spec.
 ## Quick start
 
 ```bash
-cd frontend
-npm install
-vercel env pull .env.local --environment=development   # IAM/PG env + OPENAI_API_KEY (needs Vercel project access)
+vercel env pull frontend/.env.local --environment=development
+# then restart the dev server  # IAM/PG env + OPENAI_API_KEY (needs Vercel project access)
 npm run dev                                             # http://localhost:3000
 ```
 

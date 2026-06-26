@@ -3,11 +3,12 @@
 import { Suspense, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { CheckCircle2, XCircle } from "lucide-react";
-import { useSearchParams } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { Navbar } from "@/components/landing/Navbar";
 import { verifyEmail } from "@/lib/useAuth";
 
 function VerifyEmailInner() {
+  const router = useRouter();
   const searchParams = useSearchParams();
   const token = searchParams.get("token") ?? "";
   const [status, setStatus] = useState<"loading" | "ok" | "error">("loading");
@@ -23,12 +24,25 @@ function VerifyEmailInner() {
       return;
     }
     verifyEmail(token)
-      .then(() => setStatus("ok"))
+      .then(({ role, onboarded }) => {
+        setStatus("ok");
+        // The user is now signed in. Send new users to onboarding; anyone who's
+        // already onboarded goes straight to their dashboard. Brief pause so the
+        // "verified" confirmation is visible first.
+        const target = onboarded
+          ? role === "admin"
+            ? "/admin"
+            : role === "teacher"
+              ? "/teacher/dashboard"
+              : "/student"
+          : "/onboarding";
+        setTimeout(() => router.replace(target), 1200);
+      })
       .catch((err) => {
         setStatus("error");
         setMessage(err instanceof Error ? err.message : "Verification failed.");
       });
-  }, [token]);
+  }, [token, router]);
 
   return (
     <div className="relative min-h-[100dvh] overflow-hidden bg-[#f5f5f7] text-[#1d1d1f]">
@@ -52,12 +66,12 @@ function VerifyEmailInner() {
                     <CheckCircle2 className="size-6" />
                   </div>
                   <p className="text-[17px] font-semibold">Email verified</p>
-                  <p className="text-[13px] text-[#6e6e73]">Your account is now secured.</p>
+                  <p className="text-[13px] text-[#6e6e73]">Taking you to onboarding…</p>
                   <Link
-                    href="/sign-in"
+                    href="/onboarding"
                     className="mt-2 inline-flex h-11 items-center justify-center rounded-full bg-[#0066cc] px-6 text-[15px] font-medium text-white transition hover:bg-[#0071e3]"
                   >
-                    Continue to sign in
+                    Continue
                   </Link>
                 </div>
               )}

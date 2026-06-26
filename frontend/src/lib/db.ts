@@ -69,7 +69,7 @@ function createPool(): Pool {
     // idle timeout keeps a connection around between requests on a warm instance.
     keepAlive: true,
     idleTimeoutMillis: 60_000,
-    connectionTimeoutMillis: 10_000,
+    connectionTimeoutMillis: 15_000,
   });
   attachDatabasePool(pool);
   return pool;
@@ -79,12 +79,41 @@ function createPool(): Pool {
 const pool = global.__edsynapsePool ?? createPool();
 if (process.env.NODE_ENV !== "production") global.__edsynapsePool = pool;
 
+/**
+ * Aurora Serverless scales down / pauses when idle, so the *first* connection
+ * after an idle period can time out or be dropped while the cluster wakes. These
+ * are transient — a quick retry succeeds once it's up. We only retry connection
+ * establishment failures, never query errors (which would be unsafe to repeat).
+ */
+function isTransientConnectionError(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return (
+    /Connection terminated|connection timeout|timeout exceeded|ECONNRESET|ETIMEDOUT|ENOTFOUND|server closed the connection/i.test(
+      msg,
+    )
+  );
+}
+
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
 export async function query<T = Record<string, unknown>>(
   text: string,
   params?: unknown[],
 ): Promise<{ rows: T[]; rowCount: number }> {
-  const res = await pool.query(text, params as never);
-  return { rows: res.rows as T[], rowCount: res.rowCount ?? 0 };
+  const MAX_ATTEMPTS = 3;
+  let lastErr: unknown;
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      const res = await pool.query(text, params as never);
+      return { rows: res.rows as T[], rowCount: res.rowCount ?? 0 };
+    } catch (err) {
+      lastErr = err;
+      if (attempt === MAX_ATTEMPTS || !isTransientConnectionError(err)) break;
+      // Brief backoff to give the cluster a moment to finish waking.
+      await sleep(attempt * 750);
+    }
+  }
+  throw lastErr;
 }
 
 /** Convenience: first row or null. */

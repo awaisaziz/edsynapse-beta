@@ -7,30 +7,51 @@ import { sendEmail, renderActionEmail, appBaseUrl, logDevLink } from "@/lib/emai
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-/** Re-send the email-verification link for the signed-in user. */
+/**
+ * Re-send the email-verification link. Works two ways:
+ * - Logged-out: pass `{ email }` (used by the sign-in page when a user is blocked
+ *   for being unverified). Responds generically so it can't be used to probe
+ *   which addresses have accounts.
+ * - Signed-in: no body — resends for the current user.
+ */
 export async function POST(req: NextRequest) {
   try {
-    const user = await requireUser()
-    const row = await queryOne<{ email_verified: boolean }>(
-      `SELECT email_verified FROM users WHERE id = $1`,
-      [user.id],
-    )
-    if (row?.email_verified) return NextResponse.json({ ok: true, alreadyVerified: true })
+    const body = await req.json().catch(() => ({} as Record<string, unknown>))
+    const bodyEmail = String(body?.email ?? "").trim().toLowerCase()
 
-    const token = await issueToken(user.id, "verify")
-    const link = `${appBaseUrl(req)}/verify-email?token=${token}`
-    logDevLink("verify email", link)
-    await sendEmail({
-      to: user.email,
-      subject: "Verify your EdSynapse email",
-      html: renderActionEmail({
-        heading: "Confirm your email",
-        body: `Hi ${user.firstName || "there"}, confirm your email address to secure your account and enable password recovery.`,
-        buttonLabel: "Verify email",
-        buttonUrl: link,
-        footnote: "This link expires in 24 hours.",
-      }),
-    })
+    let target: { id: string; email: string; first_name: string | null; email_verified: boolean } | null = null
+
+    if (bodyEmail) {
+      target = await queryOne(
+        `SELECT id, email, first_name, email_verified FROM users WHERE email = $1`,
+        [bodyEmail],
+      )
+    } else {
+      const user = await requireUser()
+      target = await queryOne(
+        `SELECT id, email, first_name, email_verified FROM users WHERE id = $1`,
+        [user.id],
+      )
+    }
+
+    if (target && !target.email_verified) {
+      const token = await issueToken(target.id, "verify")
+      const link = `${appBaseUrl(req)}/verify-email?token=${token}`
+      logDevLink("verify email", link)
+      await sendEmail({
+        to: target.email,
+        subject: "Confirm your EdSynapse email",
+        html: renderActionEmail({
+          heading: "Confirm your email",
+          body: `Hi ${target.first_name || "there"}, here's a fresh link to activate your EdSynapse account. Confirm your email and you're in.`,
+          buttonLabel: "Activate my account",
+          buttonUrl: link,
+          footnote: "This link expires in 24 hours. If you didn't request this, you can safely ignore it.",
+        }),
+      })
+    }
+
+    // Generic response — never reveal whether an account exists or is already verified.
     return NextResponse.json({ ok: true })
   } catch (error) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status })

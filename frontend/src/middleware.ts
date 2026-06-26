@@ -39,19 +39,12 @@ export function middleware(req: NextRequest) {
     return NextResponse.redirect(url)
   }
 
-  // Keep logged-in users out of the auth pages. We can't read the role at the
-  // edge (cookie presence only), so send them to the landing page rather than a
-  // role-specific dashboard — a teacher/admin must not be bounced into /student.
-  if ((pathname === "/sign-in" || pathname === "/sign-up") && hasSession) {
-    const url = req.nextUrl.clone()
-    url.pathname = "/"
-    url.search = ""
-    return NextResponse.redirect(url)
-  }
-
+  // The public pages (landing, /sign-in, /sign-up) are intentionally always
+  // accessible — even with a session cookie present. Auth only takes effect when
+  // the user actually signs in/up; we don't bounce anyone off the auth pages.
   return NextResponse.next()
 }
 
 export const config = {
-  matcher: ["/student/:path*", "/teacher/:path*", "/admin", "/admin/:path*", "/sign-in", "/sign-up"],
+  matcher: ["/student/:path*", "/teacher/:path*", "/admin", "/admin/:path*"],
 }

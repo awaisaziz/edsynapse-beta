@@ -23,12 +23,18 @@ ALTER TABLE enrollments ADD CONSTRAINT enrollments_role_check
 -- ── Migrate existing teaching assistants ──────────────────────────────────────
 -- Only assistants that already have an account (user_id set) can be carried over
 -- as course members; pending email-only invites are dropped with the old table.
-INSERT INTO enrollments (id, course_id, student_id, role)
-SELECT 'enr_' || ca.id, ca.course_id, ca.user_id, 'assistant'
-  FROM course_assistants ca
- WHERE ca.user_id IS NOT NULL
-ON CONFLICT (course_id, student_id)
-  DO UPDATE SET role = 'assistant';
+-- Guarded so a full re-run doesn't fail after the table has already been dropped.
+DO $$
+BEGIN
+  IF EXISTS (SELECT FROM information_schema.tables WHERE table_name = 'course_assistants') THEN
+    INSERT INTO enrollments (id, course_id, student_id, role)
+    SELECT 'enr_' || ca.id, ca.course_id, ca.user_id, 'assistant'
+      FROM course_assistants ca
+     WHERE ca.user_id IS NOT NULL
+    ON CONFLICT (course_id, student_id)
+      DO UPDATE SET role = 'assistant';
+  END IF;
+END $$;
 
 -- ── Retire the email-invite TA table ──────────────────────────────────────────
 DROP TABLE IF EXISTS course_assistants;

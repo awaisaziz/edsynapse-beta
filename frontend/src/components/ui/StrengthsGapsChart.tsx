@@ -1,23 +1,23 @@
 "use client";
 
 import React from "react";
-import { BookOpen, HelpCircle, MessageSquare, TrendingUp } from "lucide-react";
+import { HelpCircle, MessageSquare, TrendingUp } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { KnowledgeMapTopic, TopicMastery } from "@/lib/knowledgeMap";
+import { StrengthsGapsTopic, TopicMastery } from "@/lib/strengthsGaps";
 
-interface KnowledgeMapChartProps {
-  topics: KnowledgeMapTopic[];
+interface StrengthsGapsChartProps {
+  topics: StrengthsGapsTopic[];
   onAction?: (topicId: string, actionType: "tutor" | "quiz" | "review") => void;
   showActions?: boolean;
   className?: string;
 }
 
-export function KnowledgeMapChart({
+export function StrengthsGapsChart({
   topics,
   onAction,
   showActions = false,
   className,
-}: KnowledgeMapChartProps) {
+}: StrengthsGapsChartProps) {
   const getStatusConfig = (status: TopicMastery) => {
     switch (status) {
       case "strong":
@@ -114,14 +114,6 @@ export function KnowledgeMapChart({
                 >
                   <HelpCircle className="w-3.5 h-3.5" />
                   <span>Quiz</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => onAction?.(topic.id, "review")}
-                  className="flex items-center gap-1 text-xs font-semibold px-3 py-2 rounded-xl text-muted-foreground hover:bg-muted active:scale-[0.97] transition-all border border-transparent hover:border-black/5"
-                >
-                  <BookOpen className="w-3.5 h-3.5" />
-                  <span>Notes</span>
                 </button>
               </div>
             )}

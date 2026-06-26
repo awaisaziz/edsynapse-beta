@@ -60,17 +60,15 @@ export default function LandingPage() {
               Personalized learning platform
             </div>
 
-            <h1 className="max-w-[15ch] text-[clamp(2.5rem,5.6vw,4.75rem)] font-bold leading-[0.95] tracking-[-0.035em] text-balance">
-              Turn course materials{" "}
+            <h1 className="max-w-[19ch] text-[clamp(2.5rem,5.4vw,4.5rem)] font-bold leading-[0.96] tracking-[-0.035em] text-balance">
+              The personalized AI tutor that{" "}
               <span className="bg-gradient-to-r from-[#0066cc] to-[#3b82f6] bg-clip-text text-transparent">
-                into active minds.
-              </span>
+                adapts
+              </span>{" "}
+              to how you learn best.
             </h1>
 
-            <p className="mt-5 max-w-[33rem] text-[17px] leading-relaxed text-[#5a6478] sm:text-[18px]">
-              A personalized Socratic AI tutor that grounds every lesson in your own material —
-              and checks understanding as it teaches, adapting to how each learner learns best.
-            </p>
+
 
             {/* Slim audience strip — broad reach, minimal vertical footprint */}
             <div className="mt-6 flex flex-wrap items-center gap-x-4 gap-y-2 text-[13px] font-medium text-[#5a6478]">
@@ -222,7 +220,7 @@ export default function LandingPage() {
               {
                 icon: Check,
                 title: "Retrieval practice",
-                body: "Frequent low-stakes checks turn studying into active recall, the way memory is built to stick.",
+                body: "Frequent low-stakes quizzes turn studying into active recall, the way memory is built to stick.",
               },
               {
                 icon: Sparkles,

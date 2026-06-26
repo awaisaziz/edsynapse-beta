@@ -34,8 +34,8 @@ export async function POST(req: NextRequest) {
     // Count this request against the limiter regardless of outcome.
     await recordFailedLogin(email, ip)
 
-    const user = await queryOne<{ id: string; name: string; status: string }>(
-      `SELECT id, name, status FROM users WHERE email = $1`,
+    const user = await queryOne<{ id: string; first_name: string | null; status: string }>(
+      `SELECT id, first_name, status FROM users WHERE email = $1`,
       [email],
     )
     if (!user || user.status === "suspended") return generic
@@ -49,8 +49,8 @@ export async function POST(req: NextRequest) {
         subject: "Reset your EdSynapse password",
         html: renderActionEmail({
           heading: "Reset your password",
-          body: "We received a request to reset your password. Click below to choose a new one.",
-          buttonLabel: "Reset password",
+          body: `Hi ${user.first_name || "there"}, we received a request to reset your EdSynapse password. Click below to choose a new one — it only takes a moment.`,
+          buttonLabel: "Reset my password",
           buttonUrl: link,
           footnote: "This link expires in 1 hour. If you didn't request this, you can ignore this email — your password won't change.",
         }),

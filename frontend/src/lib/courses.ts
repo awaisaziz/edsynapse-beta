@@ -9,15 +9,14 @@ import { AuthError } from "@/lib/auth"
 
 /**
  * A user's access level within a single course. Decided per course, NOT by the
- * global users.role: the owner (courses.owner_id), or an enrolled member whose
- * enrollments.role is 'assistant' (teacher-level) or 'student'. `null` = no
- * access to that course at all.
+ * global users.role: the owner (courses.owner_id) or an enrolled student.
+ * `null` = no access to that course at all.
  */
-export type CourseRole = "owner" | "assistant" | "student"
+export type CourseRole = "owner" | "student"
 
 /** "Staff" = anyone who may act with teacher-level access on the course. */
 export function isCourseStaff(role: CourseRole | null): boolean {
-  return role === "owner" || role === "assistant"
+  return role === "owner"
 }
 
 /** Resolve a user's access level for a course, or null if they have none. */
@@ -25,26 +24,14 @@ export async function getCourseRole(userId: string, courseId: string): Promise<C
   const course = await queryOne<{ owner_id: string }>(`SELECT owner_id FROM courses WHERE id = $1`, [courseId])
   if (!course) return null
   if (course.owner_id === userId) return "owner"
-  try {
-    const enr = await queryOne<{ role: "student" | "assistant" }>(
-      `SELECT role FROM enrollments WHERE course_id = $1 AND student_id = $2`,
-      [courseId, userId],
-    )
-    return enr?.role ?? null
-  } catch (e) {
-    // Tolerate the pre-migration schema: if enrollments.role doesn't exist yet
-    // (014-course-roles.sql not applied), treat any enrollment as a student.
-    // Remove this fallback once the migration is applied everywhere.
-    if ((e as { code?: string })?.code !== "42703") throw e
-    const enr = await queryOne(`SELECT 1 FROM enrollments WHERE course_id = $1 AND student_id = $2`, [courseId, userId])
-    return enr ? "student" : null
-  }
+  const enr = await queryOne(`SELECT 1 FROM enrollments WHERE course_id = $1 AND student_id = $2`, [courseId, userId])
+  return enr ? "student" : null
 }
 
 /**
- * Guard for routes needing teacher-level access to a course (owner or
- * assistant). Throws AuthError(404) when the course is missing and (403) when
- * the user is a plain student or unrelated. Returns the resolved role.
+ * Guard for routes needing teacher-level access to a course (the owner). Throws
+ * AuthError(404) when the course is missing and (403) when the user is a plain
+ * student or unrelated. Returns the resolved role.
  */
 export async function requireCourseStaff(userId: string, courseId: string): Promise<CourseRole> {
   const role = await getCourseRole(userId, courseId)

@@ -24,6 +24,7 @@ Single full-stack **Next.js 15 (App Router) + React 19 + TypeScript** app — UI
 | Backend | Next.js API route handlers (no separate service) |
 | Database | Amazon Aurora PostgreSQL 17 + pgvector 0.8, **raw SQL over `pg`** (no ORM) |
 | AI | OpenAI — `gpt-4o-mini` chat by default (override via `OPENAI_MODEL`), `text-embedding-3-small` embeddings |
+| Email | **Resend** HTTPS API — email verification + password reset (`RESEND_API_KEY`, `EMAIL_FROM`). Inbound mail handled separately by Cloudflare Email Routing |
 | Hosting | Vercel (project `edsynapse-beta`) |
 
 ---
@@ -64,12 +65,24 @@ npm install
 vercel login
 vercel link            # select team awais-projects5 / project edsynapse-beta
 
-# 3. Pull the environment (AWS/PG IAM vars + OPENAI_API_KEY + a fresh OIDC token)
+# 3. Pull the environment for the DEV SERVER — AWS/PG IAM vars, OPENAI_API_KEY,
+#    RESEND_API_KEY + EMAIL_FROM (email verification / password reset), and a
+#    fresh OIDC token. Run from inside frontend/, writing frontend/.env.local:
 vercel env pull .env.local --environment=development
 
-# 4. Start the dev server
+# 4. FIRST RUN ONLY (or after adding a migration): apply the DB schema. This uses
+#    a SECOND env file at the repo root — see "Database schema" below.
+vercel env pull ../.env.development.local --environment=development
+npm run db:setup       # applies scripts/*.sql to Aurora (idempotent)
+
+# 5. Start the dev server
 npm run dev            # → http://localhost:3000
 ```
+
+> If you're pointing at the already-provisioned shared Aurora cluster, the schema
+> is already applied — step 4's `db:setup` is a safe no-op but you still need the
+> repo-root env file if you ever run migrations. Email links (verification /
+> reset) print to the server console locally when `RESEND_API_KEY` is unset.
 
 Open <http://localhost:3000>. To confirm the app **and the database connection**
 are healthy, hit the health endpoint:
@@ -212,7 +225,7 @@ All `npm` commands are run from the `frontend/` directory unless noted.
 
 | Command (where to run) | What it does |
 |------------------------|--------------|
-| `vercel env pull .env.local --environment=development` (in `frontend/`) | Refresh the **dev server** env — AWS/PG IAM vars, OPENAI_API_KEY, fresh OIDC token. Needed when DB calls start returning auth errors (~12 h TTL). |
+| `vercel env pull .env.local --environment=development` (in `frontend/`) | Refresh the **dev server** env — AWS/PG IAM vars, `OPENAI_API_KEY`, `RESEND_API_KEY`, `EMAIL_FROM`, fresh OIDC token. Needed when DB calls start returning auth errors (~12 h TTL). |
 | `vercel env pull .env.development.local --environment=development` (in **repo root**) | Refresh the **`db:setup`** env — same vars but written to the repo-root file that `run-sql.mjs` reads. |
 | `vercel dev` (in `frontend/`) | Dev server that **auto-refreshes** the OIDC token — avoids the 12 h re-pull gotcha. Slower to start than `npm run dev`. |
 
@@ -239,7 +252,9 @@ All `npm` commands are run from the `frontend/` directory unless noted.
 
 ## Deployment
 
-Pushing to `main` deploys via Vercel. The project root directory is set to
-`frontend/`, and all env (the AWS/PG IAM set, `OPENAI_API_KEY`, `OPENAI_MODEL`,
-`CRON_SECRET`) is configured per-environment in the Vercel project. See
+Pushing to `main` deploys via Vercel. The project **Root Directory must be set to
+`frontend/`** (without it the build runs from the repo root, produces no output,
+and every route 404s). All env — the AWS/PG IAM set, `OPENAI_API_KEY`,
+`OPENAI_MODEL`, `RESEND_API_KEY`, `EMAIL_FROM`, and optional `NEXT_PUBLIC_APP_URL`
+— is configured per-environment in the Vercel project. See
 [`CLAUDE.md`](CLAUDE.md#deployment) for details.

@@ -29,7 +29,8 @@ export default function AboutPage() {
         <ul className="ml-5 list-disc space-y-2">
           <li>
             <strong>Students</strong> join a course by code or upload their own material to create a
-            personal study space, then learn with an adaptive tutor and a personal knowledge map.
+            personal study space, then learn with an adaptive tutor and a personal map of their
+            strengths and gaps.
           </li>
           <li>
             <strong>Teachers</strong> create courses, upload authentic source material, choose study

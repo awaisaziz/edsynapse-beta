@@ -32,7 +32,6 @@ import {
   FolderOpen,
   GraduationCap,
   MessageCircle,
-  MessagesSquare,
   HelpCircle,
   ClipboardCheck,
   Eye,
@@ -58,7 +57,7 @@ import {
   type CourseLesson,
   type StudyMaterialVersion,
   type DiagnosticQuiz,
-  type KnowledgeMap,
+  type StrengthsGaps,
 } from "@/lib/edsynapseApi";
 
 // Colour for a lesson's mastery %, matching scoreToLevel thresholds
@@ -108,7 +107,7 @@ function CopyButton({ text, className }: { text: string; className?: string }) {
   );
 }
 
-type ClassView = "course" | "learning" | "chat" | "discussion" | "board";
+type ClassView = "course" | "learning" | "tutor" | "socratic" | "board";
 
 type Mode = "notes" | "flashcards" | "podcast" | "visual";
 
@@ -341,7 +340,7 @@ function ConversationPanel({
   newLabel,
   stream,
 }: {
-  surface: "chat" | "discussion";
+  surface: "chat" | "tutor" | "socratic" | "discussion";
   courseId: string | null;
   title: string;
   subtitle: string;
@@ -382,7 +381,14 @@ function ConversationPanel({
   }, []);
   const abortRef = useRef<AbortController | null>(null);
 
-  const defaultTitle = surface === "chat" ? "New chat" : "New discussion";
+  const defaultTitle =
+    surface === "tutor"
+      ? "New tutor chat"
+      : surface === "socratic"
+        ? "New Socratic chat"
+        : surface === "chat"
+          ? "New chat"
+          : "New discussion";
 
   const mapStored = (m: { role: "user" | "assistant"; content: string }): ChatMsg => ({
     role: m.role === "assistant" ? "ai" : "user",
@@ -604,7 +610,7 @@ function ConversationPanel({
             </div>
           ) : threads.length === 0 ? (
             <p className="px-2 py-6 text-center text-[11px] text-muted-foreground">
-              No saved {surface === "chat" ? "chats" : "discussions"} yet. Start one above.
+              No saved {surface === "tutor" ? "tutor chats" : surface === "socratic" ? "Socratic chats" : surface === "chat" ? "chats" : "discussions"} yet. Start one above.
             </p>
           ) : (
             threads.map((t) => {
@@ -696,19 +702,11 @@ function ConversationPanel({
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6 chat-scroll">
         <div className="mx-auto w-full max-w-none">
           {isWelcome ? (
-            /* Welcome hero — first impression before the learner replies */
-            <div className="flex flex-col items-center pt-8 text-center edsynapse-stagger">
-              <div
-                className="flex w-16 h-16 items-center justify-center overflow-hidden rounded-3xl bg-white shadow-lg"
-                style={{ boxShadow: `0 12px 30px -8px ${accent}66` }}
-              >
-                <Image src="/logo.png" alt="EdSynapse" width={40} height={40} className="object-contain" />
-              </div>
-              <h3 className="mt-5 text-lg font-bold text-foreground font-display">{title}</h3>
-              <p className="mt-1.5 max-w-md text-sm leading-relaxed text-muted-foreground">{messages[0].text}</p>
-
+            /* Minimal starter — just suggested topics; no logo/title/welcome copy
+               (the panel header already shows the title + subtitle). */
+            <div className="flex flex-col items-center pt-6 edsynapse-stagger">
               {suggestions.length > 0 && (
-                <div className="mt-7 grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2">
+                <div className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2">
                   {suggestions.map((s) => (
                     <button
                       key={s}
@@ -1112,30 +1110,55 @@ function CoursePanel({ course, courseColor }: { course: Course | null; courseCol
 function DiagnosticPanel({
   courseId,
   topics,
+  strengthsGaps,
   onClose,
 }: {
   courseId: string;
   topics: string[];
+  strengthsGaps: StrengthsGaps | null;
   onClose: () => void;
 }) {
   const [phase, setPhase] = useState<"intro" | "loading" | "quiz" | "grading" | "result" | "error">("intro");
   const [quiz, setQuiz] = useState<DiagnosticQuiz | null>(null);
   const [answers, setAnswers] = useState<Record<string, string>>({});
-  const [result, setResult] = useState<KnowledgeMap | null>(null);
+  const [result, setResult] = useState<StrengthsGaps | null>(null);
   const [error, setError] = useState("");
 
+  // Build a weakness-first ranked topic list.
+  // Priority: needs_improvement → moderate → untested → strong.
+  // Cap at 8 topics so the quiz stays focused (2 questions per topic = 16 Qs max).
+  const MAX_TOPICS = 8;
+  const levelRank: Record<string, number> = { needs_improvement: 0, moderate: 1, strong: 3 };
+  const knownLevels = new Map<string, string>((strengthsGaps?.topics ?? []).map((t) => [t.topic, t.level]));
+  const targetTopics = (() => {
+    const ranked = topics
+      .map((t) => ({ topic: t, rank: knownLevels.has(t) ? levelRank[knownLevels.get(t)!] ?? 3 : 2 }))
+      .sort((a, b) => a.rank - b.rank)
+      .map((x) => x.topic);
+    return ranked.slice(0, MAX_TOPICS);
+  })();
+
+  const weakTopics    = targetTopics.filter((t) => knownLevels.get(t) === "needs_improvement");
+  const moderateTopics = targetTopics.filter((t) => knownLevels.get(t) === "moderate");
+  const untestedTopics = targetTopics.filter((t) => !knownLevels.has(t));
+  const strongTopics  = targetTopics.filter((t) => knownLevels.get(t) === "strong");
+
+  const hasHistory = knownLevels.size > 0;
+
   const start = useCallback(async () => {
-    if (topics.length === 0) return;
+    if (targetTopics.length === 0) return;
     setPhase("loading");
     try {
-      const q = await studentApi.diagnoseQuiz(courseId, topics);
+      // Pass the weak topics so the server can generate harder, gap-exposing
+      // questions for those areas rather than generic introductory ones.
+      const q = await studentApi.diagnoseQuiz(courseId, targetTopics, weakTopics);
       setQuiz(q);
       setPhase("quiz");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't build the diagnostic.");
       setPhase("error");
     }
-  }, [courseId, topics]);
+  }, [courseId, targetTopics, weakTopics]);
 
   const submit = useCallback(async () => {
     if (!quiz) return;
@@ -1147,14 +1170,14 @@ function DiagnosticPanel({
         const label = !isNaN(idx) && q.choices[idx] ? q.choices[idx].label : raw;
         return { question_id: q.id, selected_label: label };
       });
-      const map = await studentApi.diagnoseEvaluate(courseId, topics, quiz.questions, formatted);
+      const map = await studentApi.diagnoseEvaluate(courseId, targetTopics, quiz.questions, formatted);
       setResult(map);
       setPhase("result");
     } catch (e) {
       setError(e instanceof Error ? e.message : "Couldn't grade your diagnostic.");
       setPhase("error");
     }
-  }, [quiz, answers, courseId, topics]);
+  }, [quiz, answers, courseId, targetTopics]);
 
   return (
     <div className="flex-1 overflow-y-auto px-6 py-8 scrollbar-hide">
@@ -1166,7 +1189,9 @@ function DiagnosticPanel({
             </div>
             <div>
               <h2 className="text-xl font-bold text-foreground font-display tracking-tight leading-tight">Diagnostic Test</h2>
-              <p className="text-[11px] text-muted-foreground">Maps your mastery across this course's topics.</p>
+              <p className="text-[11px] text-muted-foreground">
+                {hasHistory ? "Targets your weakest topics first." : "Maps your mastery across this course's topics."}
+              </p>
             </div>
           </div>
           <button onClick={onClose} className="text-xs font-bold text-muted-foreground hover:text-foreground transition-colors">
@@ -1183,25 +1208,85 @@ function DiagnosticPanel({
             ) : (
               <>
                 <div className="space-y-1">
-                  <h3 className="text-base font-bold text-foreground font-display">Ready to find your starting point?</h3>
+                  <h3 className="text-base font-bold text-foreground font-display">
+                    {hasHistory ? "Targeting your weak areas" : "Ready to find your starting point?"}
+                  </h3>
                   <p className="text-xs text-muted-foreground leading-relaxed">
-                    A short grounded quiz across {topics.length} topic{topics.length === 1 ? "" : "s"}. Your answers update your
-                    knowledge map so the tutor knows where to focus.
+                    {hasHistory
+                      ? `A focused quiz on ${targetTopics.length} topic${targetTopics.length === 1 ? "" : "s"} — prioritising the areas where you need the most work. Your answers will update your strengths & gaps.`
+                      : `A short grounded quiz across ${targetTopics.length} topic${targetTopics.length === 1 ? "" : "s"}. Your answers update your strengths & gaps so the tutor knows where to focus.`
+                    }
                   </p>
                 </div>
-                <div className="flex flex-wrap gap-1.5">
-                  {topics.slice(0, 12).map((t) => (
-                    <span key={t} className="rounded-full border border-primary/10 bg-primary/5 px-2.5 py-1 text-[10px] font-bold text-primary">
-                      {t}
-                    </span>
-                  ))}
+
+                {/* Color-coded topic badges */}
+                <div className="space-y-2">
+                  {weakTopics.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[9px] font-extrabold uppercase tracking-widest text-rose-600">Needs work — top priority</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {weakTopics.map((t) => (
+                          <span key={t} className="flex items-center gap-1 rounded-full border border-rose-200 bg-rose-50 px-2.5 py-1 text-[10px] font-bold text-rose-700">
+                            <span className="w-1.5 h-1.5 rounded-full bg-rose-500" />
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {moderateTopics.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[9px] font-extrabold uppercase tracking-widest text-amber-600">Developing — needs reinforcement</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {moderateTopics.map((t) => (
+                          <span key={t} className="flex items-center gap-1 rounded-full border border-amber-200 bg-amber-50 px-2.5 py-1 text-[10px] font-bold text-amber-700">
+                            <span className="w-1.5 h-1.5 rounded-full bg-amber-500" />
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {untestedTopics.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[9px] font-extrabold uppercase tracking-widest text-muted-foreground">Untested — included to complete your profile</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {untestedTopics.map((t) => (
+                          <span key={t} className="flex items-center gap-1 rounded-full border border-primary/10 bg-primary/5 px-2.5 py-1 text-[10px] font-bold text-primary">
+                            <span className="w-1.5 h-1.5 rounded-full bg-primary/50" />
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                  {strongTopics.length > 0 && (
+                    <div className="space-y-1">
+                      <p className="text-[9px] font-extrabold uppercase tracking-widest text-emerald-600">Strong — included for verification</p>
+                      <div className="flex flex-wrap gap-1.5">
+                        {strongTopics.map((t) => (
+                          <span key={t} className="flex items-center gap-1 rounded-full border border-emerald-200 bg-emerald-50 px-2.5 py-1 text-[10px] font-bold text-emerald-700">
+                            <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                            {t}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
                 </div>
+
+                {topics.length > MAX_TOPICS && (
+                  <p className="text-[10px] text-muted-foreground">
+                    {topics.length - MAX_TOPICS} topic{topics.length - MAX_TOPICS === 1 ? "" : "s"} skipped this round (already strong or will be covered next time).
+                  </p>
+                )}
+
                 <button
                   onClick={start}
                   className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-4 py-3 text-xs font-bold text-white shadow-lg shadow-primary/20 transition-all hover:bg-primary/95 active:scale-[0.98]"
                 >
                   <Zap className="w-4 h-4" />
-                  Start diagnostic
+                  {hasHistory ? "Start focused diagnostic" : "Start diagnostic"}
                 </button>
               </>
             )}
@@ -1373,9 +1458,25 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
   // previous topic are ignored so switching topics never shows the wrong
   // revisions bar (or hides the right one mid-load).
   const materialTopicRef = useRef<string>("");
-  // Topics whose (expensive, ~15s) generation POST is currently in flight, so a
-  // duplicate trigger for the same topic doesn't fire a second generation.
-  const generatingTopicsRef = useRef<Set<string>>(new Set());
+  // In-flight generation promise per topic. Dedupes concurrent generation for
+  // the same topic (the DB revision key can't take two parallel inserts) AND lets
+  // a topic click reuse a background lesson-prefetch already running for it.
+  const generatingTopicsRef = useRef<
+    Map<string, Promise<{ latest: StudyMaterialVersion; versions: StudyMaterialVersion[] }>>
+  >(new Map());
+
+  // Generate + persist study material for one topic, deduped: if a generation for
+  // this topic is already running (e.g. a background lesson prefetch), reuse that
+  // promise instead of firing a second ~15s LLM run.
+  const generateAndSave = useCallback((cid: string, topic: string) => {
+    const inflight = generatingTopicsRef.current.get(topic);
+    if (inflight) return inflight;
+    const p = studentApi
+      .getOrGenerateMaterials(cid, topic)
+      .finally(() => generatingTopicsRef.current.delete(topic));
+    generatingTopicsRef.current.set(topic, p);
+    return p;
+  }, []);
 
   // Drag-resizable lesson chat panel (right of the study material); width persisted.
   const chatPanel = useResizableSidebar({ storageKey: "es-lesson-chat-w", defaultWidth: 320, min: 280, max: 640, edge: "left" });
@@ -1444,6 +1545,36 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
       .catch(() => { if (!cancelled) setHasPublishedMaterial(false); });
     return () => { cancelled = true; };
   }, [courseId]);
+
+  // The student's per-topic strengths & gaps, built from quiz/assessment
+  // performance. Empty until they've attempted something — which is exactly what
+  // lets the Socratic AI suggestions stay generic at first and target weak
+  // topics once there's evidence.
+  const [strengthsGaps, setStrengthsGaps] = useState<StrengthsGaps | null>(null);
+  useEffect(() => {
+    if (!courseId) return;
+    let cancelled = false;
+    studentApi
+      .getStrengthsGaps(courseId)
+      .then((map) => { if (!cancelled) setStrengthsGaps(map); })
+      .catch(() => { if (!cancelled) setStrengthsGaps(null); });
+    return () => { cancelled = true; };
+  }, [courseId]);
+
+  // Socratic AI starter prompts: generic topics at first, then the student's
+  // weakest topics (needs_improvement → moderate → strong) once we have quiz
+  // performance to rank by. Falls back to the first topics when there's no data.
+  const chatSuggestions = (() => {
+    if (!hasPublishedMaterial) return [];
+    const rank = { needs_improvement: 0, moderate: 1, strong: 2 } as const;
+    const ranked = (strengthsGaps?.topics ?? [])
+      .filter((t) => allTopics.includes(t.topic))
+      .sort((a, b) => rank[a.level] - rank[b.level])
+      .map((t) => t.topic);
+    const ordered =
+      ranked.length > 0 ? [...ranked, ...allTopics.filter((t) => !ranked.includes(t))] : allTopics;
+    return ordered.slice(0, 4).map((t) => `Help me understand ${t}`);
+  })();
 
   // Self-study: add a lesson via the API, then prompt for its source material.
   const addLesson = useCallback(async () => {
@@ -1642,13 +1773,11 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
       // 2. Refresh/generate the latest in the background. If a new revision is
       //    produced, only auto-switch to it when the learner is still viewing what
       //    was the latest — never yank them off an older revision they opened.
-      // Skip if a generation for this exact topic is already in flight (avoids a
-      // duplicate ~15s LLM run and the version unique-key race it caused).
-      if (generatingTopicsRef.current.has(topic)) return;
-      generatingTopicsRef.current.add(topic);
+      //    generateAndSave reuses an in-flight prefetch for this topic (so a click
+      //    on a still-prebuilding topic resolves as soon as that finishes).
       setRegenerating(true);
       try {
-        const { latest, versions } = await studentApi.getOrGenerateMaterials(courseId, topic);
+        const { latest, versions } = await generateAndSave(courseId, topic);
         if (isStale()) return; // a newer topic load owns the view now
         setMaterialVersions(versions);
         const userOnPrevLatest = selectedVersionRef.current === prevLatest;
@@ -1664,7 +1793,6 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
           setSelectedVersion(null);
         }
       } finally {
-        generatingTopicsRef.current.delete(topic);
         if (!isStale()) {
           setRegenerating(false);
           setNotesLoading(false);
@@ -1672,7 +1800,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
         }
       }
     },
-    [courseId, applyVersion],
+    [courseId, applyVersion, generateAndSave],
   );
 
   // Seed the chat with a welcome message, then replace it with any persisted
@@ -1806,6 +1934,24 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
     setChatMessages([{ role: "ai", text: greeting }]);
   }, [courseId, currentTopic]);
 
+  // When a lesson opens, eagerly build + persist study material (revision 1) for
+  // EVERY topic in it, in parallel — so switching topics shows ready notes
+  // instead of a ~15s wait. Idempotent + deduped via generateAndSave: topics that
+  // already have revisions just return them; after a quiz, topics with new
+  // assessment activity get their next revision regenerated here in the background.
+  const prefetchLessonMaterials = useCallback(
+    (lesson: CourseLesson, skipTopic?: string) => {
+      if (!courseId) return;
+      for (const topic of lesson.outline) {
+        if (topic === skipTopic) continue; // the focus topic is already loading
+        generateAndSave(courseId, topic).catch(() => {
+          /* best-effort prebuild; the topic still generates on click if this fails */
+        });
+      }
+    },
+    [courseId, generateAndSave],
+  );
+
   // Selecting a lesson opens the full adaptive study workspace scoped to that
   // lesson's topic set. The tutor is grounded in the course material.
   const startLesson = useCallback(
@@ -1833,12 +1979,15 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
       setStudyStarted(true);
       setActiveMode("notes");
       triggerMaterialGeneration(focusTopic);
+      // Pre-build the rest of this lesson's topics in the background so switching
+      // to them is instant (notes already generated + saved).
+      prefetchLessonMaterials(lesson, focusTopic);
       hydrateChat(
         focusTopic,
         `Welcome to Lesson ${lesson.lesson}: ${lesson.title}. I've built grounded study material from this lesson's ${lesson.materials.length} source file${lesson.materials.length === 1 ? "" : "s"}, covering ${lesson.outline.length} topic${lesson.outline.length === 1 ? "" : "s"}. Ready when you are!`,
       );
     },
-    [triggerMaterialGeneration, hydrateChat],
+    [triggerMaterialGeneration, prefetchLessonMaterials, hydrateChat],
   );
 
   // Jump straight into studying a single topic from the sidebar — no need to go
@@ -1875,8 +2024,8 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
   const NAV_TABS: { id: ClassView; label: string; icon: any }[] = [
     { id: "course", label: "Course", icon: FolderOpen },
     { id: "learning", label: "Learning", icon: GraduationCap },
-    { id: "chat", label: "Chat", icon: MessageCircle },
-    { id: "discussion", label: "Discussion", icon: MessagesSquare },
+    { id: "tutor", label: "AI Tutor", icon: MessageCircle },
+    { id: "socratic", label: "Socratic AI", icon: Sparkles },
     { id: "board", label: "Q&A Board", icon: HelpCircle },
   ];
 
@@ -1930,24 +2079,24 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
       <div className="relative flex flex-1 min-h-0 overflow-hidden">
       {view === "course" ? (
         <CoursePanel course={course} courseColor={courseColor} />
-      ) : view === "chat" ? (
+      ) : view === "tutor" ? (
         <ConversationPanel
-          key={`chat-${courseId}`}
-          surface="chat"
+          key={`tutor-${courseId}`}
+          surface="tutor"
           courseId={courseId}
-          title="Course Chat"
-          subtitle={`Ask anything about ${course?.name ?? "this course"} — grounded in your material`}
-          accent="#1E3A8A"
+          title="AI Tutor"
+          subtitle={`Your AI Tutor for ${course?.name ?? "this course"} — grounded in your material`}
+          accent="#10B981"
           welcome={
             hasPublishedMaterial
-              ? `Hi! I'm your tutor for ${course?.name ?? "this course"}. Ask me anything about the material and I'll explain it, grounded in your uploaded sources.`
+              ? `Hi! I'm your AI Tutor for ${course?.name ?? "this course"}. Ask me any questions about the course material — I'll explain concepts clearly and guide you through the topics, grounded in your uploaded material.`
               : isSelfStudy
-                ? `Hi! Add some material to ${course?.name ?? "this course"} and I'll be able to answer questions grounded in it.`
-                : `Hi! Your teacher hasn't published any material for ${course?.name ?? "this course"} yet. Once they do, I can answer questions grounded in it.`
+                ? `Hi! I'm your AI Tutor. Add some material to ${course?.name ?? "this course"} and I'll explain it clearly, grounded in your sources.`
+                : `Hi! I'm your AI Tutor. Your teacher hasn't published any material for ${course?.name ?? "this course"} yet — once they do, I can guide you through it, grounded in those sources.`
           }
-          emptyHint="Ask a question about the course…"
-          newLabel="New chat"
-          suggestions={hasPublishedMaterial ? allTopics.slice(0, 4).map((t) => `Explain ${t}`) : []}
+          emptyHint="Ask anything about the course…"
+          newLabel="New tutor chat"
+          suggestions={chatSuggestions}
           stream={(topicKey, message, history, signal) =>
             studentApi.tutorStreamFetch(
               courseId!,
@@ -1960,33 +2109,34 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
             )
           }
         />
-      ) : view === "discussion" ? (
+      ) : view === "socratic" ? (
         <ConversationPanel
-          key={`disc-${courseId}`}
-          surface="discussion"
+          key={`socratic-${courseId}`}
+          surface="socratic"
           courseId={courseId}
-          title="Socratic Discussion"
-          subtitle={`A Socratic partner probing your overall grasp of ${course?.name ?? "this course"}`}
-          accent="#8b5cf6"
+          title="Socratic AI"
+          subtitle={`Challenge your thinking with Socratic dialogue for ${course?.name ?? "this course"}`}
+          accent="#6366F1"
           welcome={
             hasPublishedMaterial
-              ? `Let's discuss ${course?.name ?? "this course"}. I'll ask questions to understand how well you grasp the material as a whole. To start — what's one concept from this course you feel most confident about, and why?`
+              ? `Hi! I'm your Socratic AI guide for ${course?.name ?? "this course"}. I won't just give you direct facts. Instead, I'll ask probing questions to challenge your assumptions, expose logic gaps, and guide you to discover the concepts for yourself. How would you explain what you've learned from this course so far?`
               : isSelfStudy
-                ? `Add some material to ${course?.name ?? "this course"} and we can start a grounded discussion about it.`
-                : `There's no published material for ${course?.name ?? "this course"} yet, so we can't start a grounded discussion. Check back once your teacher publishes material.`
+                ? `Hi! I'm your Socratic AI guide. Add some study material to ${course?.name ?? "this course"}, and we can explore it. Let me know what you want to teach me today!`
+                : `Hi! I'm your Socratic AI guide. Once your teacher publishes materials for ${course?.name ?? "this course"}, I can ask you questions to test and deepen your understanding.`
           }
-          emptyHint="Share your thinking…"
-          newLabel="New discussion"
-          suggestions={
-            hasPublishedMaterial
-              ? [
-                  "Quiz me on the big ideas of this course",
-                  "I'm not sure where my gaps are — help me find out",
-                ]
-              : []
-          }
-          stream={(topicKey, message, _history, signal) =>
-            studentApi.discussionStreamFetch(courseId!, course?.name ?? "this course", message, signal, topicKey)
+          emptyHint="Ask a question, and let the dialogue begin…"
+          newLabel="New Socratic chat"
+          suggestions={chatSuggestions}
+          stream={(topicKey, message, history, signal) =>
+            studentApi.socraticStreamFetch(
+              courseId!,
+              course?.name ?? "this course",
+              message,
+              history,
+              { modality, pace },
+              signal,
+              topicKey,
+            )
           }
         />
       ) : view === "board" ? (
@@ -2039,7 +2189,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
             )}
             {/* Jump to this course's overall knowledge analysis. */}
             <Link
-              href={courseId ? `/student/knowledge-map?course=${courseId}` : "/student/knowledge-map"}
+              href={courseId ? `/student/strengths-gaps?course=${courseId}` : "/student/strengths-gaps"}
               aria-disabled={!courseId}
               className={cn(
                 "flex w-full items-center gap-2 rounded-2xl border px-3 py-2.5 text-left text-xs font-bold transition-all duration-150 active:scale-[0.98]",
@@ -2048,7 +2198,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
               )}
             >
               <Network className="w-4 h-4 shrink-0" />
-              <span>Knowledge Map</span>
+              <span>Strengths & Gaps</span>
               <ChevronRight className="ml-auto w-3.5 h-3.5" />
             </Link>
             <button
@@ -2293,7 +2443,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
               </button>
             </div>
           ) : diagnosticOpen ? (
-            <DiagnosticPanel courseId={courseId!} topics={allTopics} onClose={() => setDiagnosticOpen(false)} />
+            <DiagnosticPanel courseId={courseId!} topics={allTopics} strengthsGaps={strengthsGaps} onClose={() => setDiagnosticOpen(false)} />
           ) : !studyStarted ? (
             /* PRE-STUDY: Greeting Chat */
             <div className="flex flex-1 flex-col">

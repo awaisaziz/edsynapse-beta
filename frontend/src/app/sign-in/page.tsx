@@ -5,7 +5,7 @@ import Link from "next/link";
 import { ArrowRight } from "lucide-react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Navbar } from "@/components/landing/Navbar";
-import { login } from "@/lib/useAuth";
+import { login, resendVerification, AuthRequestError } from "@/lib/useAuth";
 
 function SignInForm() {
   const router = useRouter();
@@ -14,11 +14,20 @@ function SignInForm() {
   const [password, setPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [needsVerify, setNeedsVerify] = useState(false);
+  const [resent, setResent] = useState(false);
+
+  const handleResend = async () => {
+    await resendVerification(email.trim());
+    setResent(true);
+  };
 
   const handleSignIn = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
     setError("");
+    setNeedsVerify(false);
+    setResent(false);
     try {
       // Identity and authority come from the account's real role in the DB —
       // there is no portal/role to pick, so the user can never land in the
@@ -34,6 +43,9 @@ function SignInForm() {
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign in failed.");
+      if (err instanceof AuthRequestError && err.code === "email_not_verified") {
+        setNeedsVerify(true);
+      }
       setLoading(false);
     }
   };
@@ -59,6 +71,16 @@ function SignInForm() {
                 {error && (
                   <div className="rounded-[14px] border border-rose-200 bg-rose-50 px-4 py-2.5 text-[13px] font-medium text-rose-600">
                     {error}
+                    {needsVerify && (
+                      <button
+                        type="button"
+                        onClick={handleResend}
+                        disabled={resent}
+                        className="mt-1.5 block font-semibold text-[#0066cc] transition hover:underline disabled:text-[#86868b] disabled:no-underline"
+                      >
+                        {resent ? "Verification email resent — check your inbox." : "Resend verification email"}
+                      </button>
+                    )}
                   </div>
                 )}
                 <div className="rounded-[18px] border border-[#1d1d1f]/10 bg-white/82 px-4 shadow-[inset_0_1px_0_rgba(255,255,255,1)] transition focus-within:border-[#0066cc]/45 focus-within:ring-4 focus-within:ring-[#0066cc]/10">

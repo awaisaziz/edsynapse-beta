@@ -10,7 +10,12 @@ export const dynamic = "force-dynamic"
 // Named conversation threads for the Chat + Discussion tabs. Each thread is a
 // tutor_sessions row whose `topic` is prefixed by surface so threads never
 // collide with the per-topic Learning tutor sessions in the same table.
-const PREFIX: Record<string, string> = { chat: "__chat__:", discussion: "__disc__:" }
+const PREFIX: Record<string, string> = {
+  chat: "__chat__:",
+  tutor: "__tutor__:",
+  socratic: "__socr__:",
+  discussion: "__disc__:",
+}
 
 function prefixFor(surface: string): string | null {
   return PREFIX[surface] ?? null
@@ -56,7 +61,14 @@ export const POST = handle(async (req: NextRequest) => {
   const courseId: string | null = body.course_id ?? null
   const prefix = prefixFor(String(body.surface ?? ""))
   if (!prefix) return badRequest("Unknown surface")
-  const title = (typeof body.title === "string" && body.title.trim()) || (prefix === PREFIX.chat ? "New chat" : "New discussion")
+  
+  let defaultTitle = "New discussion";
+  if (prefix === PREFIX.tutor || prefix === PREFIX.chat) {
+    defaultTitle = "New tutor chat";
+  } else if (prefix === PREFIX.socratic) {
+    defaultTitle = "New Socratic chat";
+  }
+  const title = (typeof body.title === "string" && body.title.trim()) || defaultTitle;
   const topic = `${prefix}${nanoid(12)}`
 
   await query(

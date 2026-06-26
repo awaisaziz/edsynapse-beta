@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { nanoid } from "nanoid"
 import { query, queryOne } from "@/lib/db"
-import { hashPassword, createSession, validatePassword, type Role } from "@/lib/auth"
+import { hashPassword, validatePassword, type Role } from "@/lib/auth"
 import { issueToken } from "@/lib/authTokens"
 import { sendEmail, renderActionEmail, appBaseUrl, logDevLink } from "@/lib/email"
 
@@ -42,29 +42,33 @@ export async function POST(req: NextRequest) {
     )
 
     // Fire off an email-verification link. Failure here must not block signup —
-    // the user can request a new link later from Settings.
+    // the user can request a new link later from the sign-in page.
+    let emailSent = false
     try {
       const token = await issueToken(id, "verify")
       const link = `${appBaseUrl(req)}/verify-email?token=${token}`
       logDevLink("verify email", link)
       await sendEmail({
         to: email,
-        subject: "Verify your EdSynapse email",
+        subject: "Welcome to EdSynapse — confirm your email",
         html: renderActionEmail({
           heading: "Welcome to EdSynapse",
-          body: `Hi ${firstName || "there"}, confirm your email address to secure your account and enable password recovery.`,
-          buttonLabel: "Verify email",
+          body: `Hi ${firstName || "there"}, welcome aboard! You're one click away from your personalized AI tutor. Confirm your email to activate your account and start learning.`,
+          buttonLabel: "Activate my account",
           buttonUrl: link,
-          footnote: "This link expires in 24 hours. If you didn't sign up, ignore this email.",
+          footnote: "This link expires in 24 hours. If you didn't sign up for EdSynapse, you can safely ignore this email.",
         }),
       })
+      emailSent = true
     } catch (e) {
       console.error("[v0] verification email error:", e)
     }
 
-    await createSession(id)
+    // No session is created here: the account must verify its email before it can
+    // sign in (gate enforced in /api/auth/login). The client shows a
+    // "check your inbox" screen and offers a resend on the sign-in page.
     return NextResponse.json(
-      { user: { id, email, name, firstName, lastName, role, institution, onboarded: false } },
+      { ok: true, needsVerification: true, emailSent, email },
       { status: 201 },
     )
   } catch (error) {

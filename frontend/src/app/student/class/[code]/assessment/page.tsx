@@ -593,7 +593,7 @@ export default function AssessmentPage({ params }: { params: Promise<{ code: str
             <div className="space-y-1">
               <h3 className="text-base font-bold text-foreground font-display">Submit your assessment?</h3>
               <p className="text-xs text-muted-foreground">
-                Once submitted, the AI tutor will grade your responses and update your knowledge map.
+                Once submitted, the AI tutor will grade your responses and update your strengths &amp; gaps.
               </p>
             </div>
             <div className="flex items-center gap-3 pt-2">

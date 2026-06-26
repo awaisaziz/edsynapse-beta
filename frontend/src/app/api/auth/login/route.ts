@@ -34,8 +34,9 @@ export async function POST(req: NextRequest) {
       institution: string
       status: string
       password_hash: string
+      email_verified: boolean
     }>(
-      `SELECT id, email, name, role, institution, status, password_hash FROM users WHERE email = $1`,
+      `SELECT id, email, name, role, institution, status, password_hash, email_verified FROM users WHERE email = $1`,
       [email],
     )
 
@@ -48,10 +49,23 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "This account has been suspended. Contact support." }, { status: 403 })
     }
 
+    // Credentials are valid, so clear the throttle counter — but block access
+    // until the email is confirmed. The client surfaces a "resend link" action
+    // on this `code`, so an unverified user is never stuck.
+    await clearLoginAttempts(email)
+    if (!user.email_verified) {
+      return NextResponse.json(
+        {
+          error: "Please verify your email before signing in. Check your inbox for the verification link.",
+          code: "email_not_verified",
+        },
+        { status: 403 },
+      )
+    }
+
     // No portal/role is supplied at login: authority is the account's real role
     // in the DB. The client routes by the role returned below, and every
     // protected route re-checks the role server-side via requireUser(role).
-    await clearLoginAttempts(email)
     await createSession(user.id)
     return NextResponse.json({
       user: { id: user.id, email: user.email, name: user.name, role: user.role, institution: user.institution },

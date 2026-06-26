@@ -86,6 +86,16 @@ export function useRequireOnboarded() {
   }, [user, isLoading, router])
 }
 
+/** Error thrown by login/register that carries the server's machine-readable code. */
+export class AuthRequestError extends Error {
+  code?: string
+  constructor(message: string, code?: string) {
+    super(message)
+    this.name = "AuthRequestError"
+    this.code = code
+  }
+}
+
 export async function login(email: string, password: string): Promise<AuthUser> {
   const res = await fetch("/api/auth/login", {
     method: "POST",
@@ -93,9 +103,23 @@ export async function login(email: string, password: string): Promise<AuthUser> 
     body: JSON.stringify({ email, password }),
   })
   const data = await res.json()
-  if (!res.ok) throw new Error(data.error ?? "Login failed")
+  if (!res.ok) throw new AuthRequestError(data.error ?? "Login failed", data.code)
   await revalidateSession()
   return data.user
+}
+
+/**
+ * Resend the email-verification link for a (possibly logged-out) address. Always
+ * resolves — the server responds generically whether or not the account exists.
+ */
+export async function resendVerification(email?: string): Promise<void> {
+  await fetch("/api/auth/resend-verification", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    // With an email, resends for a logged-out address (sign-in/sign-up screens);
+    // without one, resends for the signed-in user (Settings).
+    body: JSON.stringify(email ? { email } : {}),
+  })
 }
 
 export async function register(input: {
@@ -105,7 +129,7 @@ export async function register(input: {
   password: string
   role: "teacher" | "student"
   institution?: string
-}): Promise<AuthUser> {
+}): Promise<{ needsVerification: boolean; emailSent: boolean; email: string }> {
   const res = await fetch("/api/auth/register", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -113,8 +137,13 @@ export async function register(input: {
   })
   const data = await res.json()
   if (!res.ok) throw new Error(data.error ?? "Registration failed")
-  await revalidateSession()
-  return data.user
+  // No session is created at signup anymore — the account must verify its email
+  // first, so there's nothing to revalidate here.
+  return {
+    needsVerification: Boolean(data.needsVerification),
+    emailSent: Boolean(data.emailSent),
+    email: input.email,
+  }
 }
 
 /** Update the current user's profile (Settings) or complete onboarding. */
@@ -181,23 +210,20 @@ export async function resetPassword(token: string, password: string): Promise<vo
 }
 
 /** Confirm an email address with the token from the emailed link. */
-export async function verifyEmail(token: string): Promise<void> {
+export async function verifyEmail(token: string): Promise<{ role: string; onboarded: boolean }> {
   const res = await fetch("/api/auth/verify-email", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ token }),
   })
+  const data = await res.json().catch(() => ({}))
   if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
     throw new Error(data.error ?? "Failed to verify email")
   }
+  // Verification logs the user in (a session cookie was set) — refresh the
+  // client session so the app sees them as authenticated for onboarding.
+  await revalidateSession()
+  return { role: data.role ?? "student", onboarded: Boolean(data.onboarded) }
 }
 
 /** Re-send the verification email for the signed-in user. */
-export async function resendVerification(): Promise<void> {
-  const res = await fetch("/api/auth/resend-verification", { method: "POST" })
-  if (!res.ok) {
-    const data = await res.json().catch(() => ({}))
-    throw new Error(data.error ?? "Failed to send verification email")
-  }
-}

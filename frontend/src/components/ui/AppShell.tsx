@@ -57,8 +57,8 @@ export function AppShell({ children, role = "student" }: AppShellProps) {
             icon: Home,
           },
           {
-            label: "Knowledge Map",
-            href: "/student/knowledge-map",
+            label: "Strengths & Gaps",
+            href: "/student/strengths-gaps",
             icon: BookMarked,
           },
           {

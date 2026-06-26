@@ -1,35 +1,20 @@
-"use client";
-
 import React from "react";
 import Link from "next/link";
 import Image from "next/image";
-import { useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
-import { LogOut, LayoutDashboard } from "lucide-react";
 import { FEEDBACK_URL } from "@/lib/feedback";
-import { useAuth, logout } from "@/lib/useAuth";
 
 interface NavbarProps {
   variant?: "light" | "dark" | "glass";
 }
 
+/**
+ * Public marketing navbar (landing, sign-in, sign-up, legal pages). Intentionally
+ * has NO auth awareness: it never reads the session or calls /api/auth/me, so the
+ * public pages stay fully static and auth only ever happens once the user signs
+ * in / up. The in-app navigation (AppShell) handles the signed-in experience.
+ */
 export function Navbar({ variant = "glass" }: NavbarProps) {
-  const router = useRouter();
-  // Auth state comes from the real session (/api/auth/me), not the URL or
-  // localStorage — otherwise the landing page always looks logged-out and the
-  // Sign in/up links bounce off the middleware redirect for an existing session.
-  const { user, refresh } = useAuth();
-  const isAuthenticated = Boolean(user);
-
-  const handleSignOut = async () => {
-    await logout();
-    await refresh();
-    router.push("/");
-  };
-
-  const dashboardUrl =
-    user?.role === "admin" ? "/admin" : user?.role === "teacher" ? "/teacher/dashboard" : "/student";
-
   return (
     <nav className="fixed inset-x-0 top-0 z-50 px-4 py-4 sm:px-6">
       <div
@@ -42,8 +27,6 @@ export function Navbar({ variant = "glass" }: NavbarProps) {
             : "border border-black/5 bg-white/95 text-foreground"
         )}
       >
-        {/* Exception to the "logo → dashboard" rule: the landing-page logo always
-            returns to the public landing, even when signed in. */}
         <Link href="/" className="flex items-center gap-2.5 pl-1">
           <div className="relative flex size-8 items-center justify-center overflow-hidden rounded-lg">
             <Image
@@ -71,71 +54,47 @@ export function Navbar({ variant = "glass" }: NavbarProps) {
           </span>
         </Link>
 
-        {/* Center Nav links - hide when authenticated */}
-        {!isAuthenticated && (
-          <div className="hidden items-center gap-6 text-xs font-bold text-muted-foreground md:flex">
-            <Link href="/#how-it-works" className="transition-colors hover:text-foreground">
-              How it works
-            </Link>
-            <Link href="/#teachers" className="transition-colors hover:text-foreground">
-              Teachers
-            </Link>
-            <Link href="/#students" className="transition-colors hover:text-foreground">
-              Students
-            </Link>
-            <Link href="/#institutions" className="transition-colors hover:text-foreground">
-              Institution
-            </Link>
-            <Link href="/about" className="transition-colors hover:text-foreground">
-              About
-            </Link>
-            <a
-              href={FEEDBACK_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="transition-colors hover:text-foreground"
-            >
-              Feedback
-            </a>
-          </div>
-        )}
+        {/* Center nav links */}
+        <div className="hidden items-center gap-6 text-xs font-bold text-muted-foreground md:flex">
+          <Link href="/#how-it-works" className="transition-colors hover:text-foreground">
+            How it works
+          </Link>
+          <Link href="/#teachers" className="transition-colors hover:text-foreground">
+            Teachers
+          </Link>
+          <Link href="/#students" className="transition-colors hover:text-foreground">
+            Students
+          </Link>
+          <Link href="/#institutions" className="transition-colors hover:text-foreground">
+            Institution
+          </Link>
+          <Link href="/about" className="transition-colors hover:text-foreground">
+            About
+          </Link>
+          <a
+            href={FEEDBACK_URL}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="transition-colors hover:text-foreground"
+          >
+            Feedback
+          </a>
+        </div>
 
-        {/* Dynamic CTAs */}
+        {/* Public CTAs — always Sign in / Sign up; no session awareness here. */}
         <div className="flex items-center gap-2">
-          {isAuthenticated ? (
-            <>
-              <Link
-                href={dashboardUrl}
-                className="flex h-9 items-center gap-1.5 rounded-full border border-primary/10 bg-white/70 px-4 text-xs font-bold text-primary transition-all duration-150 hover:bg-white active:scale-[0.97]"
-              >
-                <LayoutDashboard className="w-3.5 h-3.5" />
-                <span>Dashboard</span>
-              </Link>
-              <button
-                onClick={handleSignOut}
-                type="button"
-                className="flex h-9 items-center gap-1.5 rounded-full bg-rose-600 px-4 text-xs font-bold text-white transition-all duration-150 hover:bg-rose-700 active:scale-[0.97]"
-              >
-                <LogOut className="w-3.5 h-3.5" />
-                <span>Sign Out</span>
-              </button>
-            </>
-          ) : (
-            <>
-              <Link
-                href="/sign-in"
-                className="flex h-9 items-center gap-1.5 rounded-full border border-primary/10 bg-white/70 px-4 text-xs font-bold text-primary transition-all duration-150 hover:bg-white active:scale-[0.97]"
-              >
-                Sign in
-              </Link>
-              <Link
-                href="/sign-up"
-                className="flex h-9 items-center gap-1.5 rounded-full bg-primary px-4 text-xs font-bold text-white transition-all duration-150 hover:bg-primary/95 active:scale-[0.97] shadow-lg shadow-primary/20"
-              >
-                Sign up
-              </Link>
-            </>
-          )}
+          <Link
+            href="/sign-in"
+            className="flex h-9 items-center gap-1.5 rounded-full border border-primary/10 bg-white/70 px-4 text-xs font-bold text-primary transition-all duration-150 hover:bg-white active:scale-[0.97]"
+          >
+            Sign in
+          </Link>
+          <Link
+            href="/sign-up"
+            className="flex h-9 items-center gap-1.5 rounded-full bg-primary px-4 text-xs font-bold text-white transition-all duration-150 hover:bg-primary/95 active:scale-[0.97] shadow-lg shadow-primary/20"
+          >
+            Sign up
+          </Link>
         </div>
       </div>
     </nav>

@@ -21,10 +21,8 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
       avg_score: string | null
       last_active: string | null
     }
-    // The cohort is enrolled students only (excludes assistants). `roleFilter`
-    // is dropped automatically on the pre-migration schema where enrollments.role
-    // doesn't exist yet (014-course-roles.sql not applied).
-    const cohortQuery = (roleFilter: string) =>
+    // The cohort is every enrolled student in the course.
+    const cohortQuery = () =>
       query<StudentRow>(
         `SELECT u.id, u.name, u.email,
                 COUNT(qa.id)::text AS attempts,
@@ -33,7 +31,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
            FROM enrollments e
            JOIN users u ON u.id = e.student_id
            LEFT JOIN quiz_attempts qa ON qa.student_id = u.id AND qa.course_id = $1
-          WHERE e.course_id = $1 ${roleFilter}
+          WHERE e.course_id = $1
           GROUP BY u.id, u.name, u.email
           ORDER BY u.name ASC`,
         [courseId],
@@ -41,10 +39,7 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
 
     // Cohort roster + topic mastery distribution are independent — fetch concurrently.
     const [{ rows: students }, { rows: topics }] = await Promise.all([
-      cohortQuery("AND e.role = 'student'").catch((e: { code?: string }) => {
-        if (e?.code !== "42703") throw e
-        return cohortQuery("")
-      }),
+      cohortQuery(),
       // Topic-level mastery distribution across the cohort.
       query<{ topic: string; level: string; n: string }>(
         `SELECT topic, level, COUNT(*)::text AS n

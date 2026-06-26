@@ -56,8 +56,70 @@ export async function generateJSON<T>(
     temperature: opts?.temperature ?? 0.4,
     ...(opts?.maxTokens ? { max_tokens: opts.maxTokens } : {}),
   });
-  const content = res.choices[0]?.message?.content ?? "{}";
+
+  const choice = res.choices[0];
+  let content = choice?.message?.content ?? "{}";
+
+  // If the model ran out of tokens the JSON will be incomplete. Attempt a
+  // best-effort repair before surfacing a useful error to the caller.
+  if (choice?.finish_reason === "length") {
+    const repaired = repairTruncatedJSON(content);
+    if (repaired !== null) {
+      content = repaired;
+    } else {
+      throw new Error(
+        `LLM output was truncated before JSON could be completed ` +
+        `(finish_reason=length, ${content.length} chars). ` +
+        `Increase maxTokens or reduce the number of topics.`,
+      );
+    }
+  }
+
   return JSON.parse(content) as T;
+}
+
+/**
+ * Attempt to close a truncated JSON string so it can be parsed.
+ * Handles the most common case: the last string value was cut mid-character.
+ * Returns the repaired string or null if it can't be fixed safely.
+ */
+function repairTruncatedJSON(raw: string): string | null {
+  // Strip any trailing partial escape sequences or incomplete unicode.
+  let s = raw.trimEnd();
+
+  // Walk the stack to figure out what's open.
+  const stack: ("object" | "array")[] = [];
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (escaped) { escaped = false; continue; }
+    if (ch === "\\" && inString) { escaped = true; continue; }
+    if (ch === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (ch === "{") stack.push("object");
+    else if (ch === "[") stack.push("array");
+    else if (ch === "}" || ch === "]") stack.pop();
+  }
+
+  // If we ended mid-string, close it first (may produce a garbled last field,
+  // but the surrounding structure will be valid).
+  if (inString) s += '"';
+
+  // Close any open arrays and objects.
+  const closers: string[] = [];
+  for (let i = stack.length - 1; i >= 0; i--) {
+    closers.push(stack[i] === "object" ? "}" : "]");
+  }
+  s += closers.join("");
+
+  try {
+    JSON.parse(s); // validate
+    return s;
+  } catch {
+    return null;
+  }
 }
 
 /** Retrieve grounding context for a course + query. */
@@ -93,7 +155,9 @@ export async function* streamTutorReply(params: {
   memory?: TutorMemory;
 }): AsyncGenerator<string> {
   const system = [
-    `You are EdSynapse, a patient, Socratic AI tutor helping a student understand "${params.topic}".`,
+    `You are EdSynapse, a patient, expert AI Tutor helping a student understand "${params.topic}".`,
+    `Your primary goal is to teach the course material clearly, directly, and comprehensively when the student asks questions.`,
+    `Explain concepts thoroughly with clear definitions, examples, and structured details. Do not withhold facts or answers.`,
     GROUNDING_RULE,
     `Adapt to the learner: modality preference = ${params.modality}, pace = ${params.pace}.`,
     `Explain clearly, check understanding, and encourage. Keep replies focused and not overly long.`,
@@ -110,6 +174,53 @@ export async function* streamTutorReply(params: {
     model: CHAT_MODEL,
     stream: true,
     temperature: 0.6,
+    messages: [
+      { role: "system", content: system },
+      ...params.history.slice(-8),
+      { role: "user", content: params.message },
+    ],
+  });
+
+  for await (const part of stream) {
+    const delta = part.choices[0]?.delta?.content;
+    if (delta) yield delta;
+  }
+}
+
+/** Stream a Socratic tutor reply in a question-based, guide style. */
+export async function* streamSocraticReply(params: {
+  topic: string;
+  message: string;
+  context: string;
+  history: { role: "user" | "assistant"; content: string }[];
+  modality: string;
+  pace: string;
+  memory?: TutorMemory;
+}): AsyncGenerator<string> {
+  const system = [
+    `You are EdSynapse's Socratic AI guide helping a student understand "${params.topic}".`,
+    `Your style of teaching is conversational, student-centered, and question-driven.`,
+    `Act as a guide rather than a lecturer. Instead of providing facts or direct explanations, ask probing, open-ended questions to challenge assumptions, expose logic flaws or contradictions, and help the student discover the truth and understanding for themselves.`,
+    `Make the user wonder how to explain or teach the concept to you, so they must think critically and formulate the understanding themselves. Do NOT hand over full explanations or answers. If they ask a direct question, guide them to reason through it or ask what they think the answer is first.`,
+    `- Student's Primary Role: Answering, explaining, and debating.`,
+    `- Teacher's/Your Primary Role: Probing with questions, challenging logic, and exposing contradictions.`,
+    `- Ultimate Cognitive Goal: Exposing logic flaws, improving critical thinking, and checking understanding.`,
+    `Keep each reply brief and conversational (typically 2-4 sentences) and always end with a single, clear, probing question.`,
+    GROUNDING_RULE,
+    `Adapt to the learner: modality preference = ${params.modality}, pace = ${params.pace}.`,
+    `Format your replies in Markdown (headings, bold, lists). Write all mathematical notation in LaTeX, delimited ONLY with dollar signs: inline math as $...$ and display equations as $$...$$. Never use \\( \\) or \\[ \\] delimiters.`,
+    memoryBlock(params.memory),
+    params.context
+      ? `\n\nSOURCE MATERIAL:\n${params.context}`
+      : `\n\n(No specific source material is available for this topic; use Socratic guiding based on general fundamentals.)`,
+  ]
+    .filter(Boolean)
+    .join("\n");
+
+  const stream = await getChatClient().chat.completions.create({
+    model: CHAT_MODEL,
+    stream: true,
+    temperature: 0.7,
     messages: [
       { role: "system", content: system },
       ...params.history.slice(-8),

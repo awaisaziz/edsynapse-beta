@@ -18,13 +18,13 @@ import {
   ListChecks,
   Loader2,
   MessagesSquare,
+  AlertCircle,
   Plus,
   Search,
   Share2,
   TrendingUp,
   Trash2,
   Trophy,
-  UserPlus,
   Users,
   X,
 } from "lucide-react";
@@ -34,7 +34,6 @@ import {
   type Course,
   type CourseLesson,
   type CourseAnalytics,
-  type Assistant,
   type StudentRecord,
   type AttemptDetail,
 } from "@/lib/edsynapseApi";
@@ -81,6 +80,7 @@ function LessonCard({
   onPatch,
   onDelete,
   onUpload,
+  onDeleteMaterial,
 }: {
   lesson: CourseLesson;
   color: string;
@@ -89,12 +89,14 @@ function LessonCard({
   onPatch: (patch: { title?: string; outline?: string[]; published?: boolean }) => void;
   onDelete: () => void;
   onUpload: (files: File[]) => Promise<void>;
+  onDeleteMaterial: (sourceId: string) => Promise<void>;
 }) {
   const [expanded, setExpanded] = useState(false);
   const [title, setTitle] = useState(lesson.title);
   const [outlineInput, setOutlineInput] = useState("");
   const [files, setFiles] = useState<File[]>([]);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState<string | null>(null);
 
   useEffect(() => setTitle(lesson.title), [lesson.title]);
 
@@ -109,11 +111,15 @@ function LessonCard({
     onPatch({ outline: lesson.outline.filter((_, j) => j !== i) });
 
   const handleFilesSelected = async (newFiles: File[]) => {
+    setUploadError(null);
     setFiles(newFiles);
     setUploading(true);
     try {
       await onUpload(newFiles);
       setFiles([]);
+    } catch (err) {
+      console.error(err);
+      setUploadError(err instanceof Error ? err.message : "Failed to ingest source material.");
     } finally {
       setUploading(false);
     }
@@ -263,6 +269,18 @@ function LessonCard({
                       >
                         {m.published ? "Visible" : "Hidden"}
                       </span>
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (confirm(`Are you sure you want to remove "${m.name}"?`)) {
+                            onDeleteMaterial(m.id);
+                          }
+                        }}
+                        className="p-1 rounded-md text-muted-foreground hover:bg-rose-50 hover:text-rose-600 transition-all duration-150 active:scale-95 shrink-0"
+                        title="Delete material"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -273,7 +291,15 @@ function LessonCard({
                   Ingesting & embedding…
                 </div>
               ) : (
-                <FileUploadZone onFilesSelected={handleFilesSelected} selectedFiles={files} onRemoveFile={() => setFiles([])} />
+                <>
+                  <FileUploadZone onFilesSelected={handleFilesSelected} selectedFiles={files} onRemoveFile={() => setFiles([])} />
+                  {uploadError && (
+                    <div className="flex items-start gap-2.5 p-3 rounded-xl bg-rose-50/10 text-rose-600 text-xs border border-rose-500/15 mt-2">
+                      <AlertCircle className="w-4.5 h-4.5 shrink-0 mt-0.5" />
+                      <span>{uploadError}</span>
+                    </div>
+                  )}
+                </>
               )}
             </div>
           </div>
@@ -293,16 +319,16 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
   const [busyLesson, setBusyLesson] = useState<string | null>(null);
 
   const [analytics, setAnalytics] = useState<CourseAnalytics | null>(null);
-  const [assistants, setAssistants] = useState<Assistant[]>([]);
 
   const [activeTab, setActiveTab] = useState<"content" | "students" | "discussion">("content");
   const [codeCopied, setCodeCopied] = useState(false);
   const [shareToast, setShareToast] = useState(false);
-  const [showInviteTA, setShowInviteTA] = useState(false);
-  const [taError, setTaError] = useState("");
   const [studentView, setStudentView] = useState<"dashboard" | "roster">("dashboard");
   const [studentQuery, setStudentQuery] = useState("");
   const [selectedStudentId, setSelectedStudentId] = useState<string | null>(null);
+  const [removeStudentId, setRemoveStudentId] = useState<string | null>(null);
+  const [removeStudentBusy, setRemoveStudentBusy] = useState(false);
+  const [removeStudentError, setRemoveStudentError] = useState("");
   // Cohort Syllabus Gaps order: weakest topics first by default; toggle to flip.
   const [gapsWeakFirst, setGapsWeakFirst] = useState(true);
   // Read-only per-student record (attempt history + per-topic mastery) and the
@@ -312,18 +338,14 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
   const [reviewAttempt, setReviewAttempt] = useState<AttemptDetail | null>(null);
   const [reviewLoading, setReviewLoading] = useState(false);
 
-  // Load course + assistants
+  // Load course
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
-        const [{ course }, { assistants }] = await Promise.all([
-          teacherApi.getCourse(id),
-          teacherApi.listAssistants(id),
-        ]);
+        const { course } = await teacherApi.getCourse(id);
         if (cancelled) return;
         setCourse(course);
-        setAssistants(assistants);
       } catch {
         if (!cancelled) setNotFound(true);
       } finally {
@@ -423,6 +445,20 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
     }
   };
 
+  const deleteMaterial = async (lessonId: string, sourceId: string) => {
+    setBusyLesson(lessonId);
+    try {
+      await teacherApi.deleteSource(id, sourceId);
+      const { course } = await teacherApi.getCourse(id);
+      setCourse(course);
+    } catch (e) {
+      console.error("[v0] delete material error:", e);
+      throw e;
+    } finally {
+      setBusyLesson(null);
+    }
+  };
+
 
   const copyText = async (text: string) => {
     try {
@@ -452,21 +488,23 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
     setTimeout(() => setShareToast(false), 2000);
   };
 
-  // Promote an enrolled student to teaching assistant (course-scoped teacher access).
-  const promoteTA = async (userId: string) => {
-    setTaError("");
+  const removeStudent = async (studentId: string) => {
+    setRemoveStudentBusy(true);
+    setRemoveStudentError("");
     try {
-      const { assistants } = await teacherApi.promoteAssistant(id, userId);
-      setAssistants(assistants);
-      setShowInviteTA(false);
+      await teacherApi.removeStudent(id, studentId);
+      // Remove from local analytics state so the UI updates instantly.
+      setAnalytics((prev) =>
+        prev ? { ...prev, students: prev.students.filter((s) => s.id !== studentId) } : prev
+      );
+      // If we were viewing this student's record, clear selection.
+      if (selectedStudentId === studentId) setSelectedStudentId(null);
+      setRemoveStudentId(null);
     } catch (e) {
-      setTaError(e instanceof Error ? e.message : "Failed to promote assistant.");
+      setRemoveStudentError(e instanceof Error ? e.message : "Failed to remove student.");
+    } finally {
+      setRemoveStudentBusy(false);
     }
-  };
-
-  const removeTA = async (userId: string) => {
-    const { assistants } = await teacherApi.removeAssistant(id, userId);
-    setAssistants(assistants);
   };
 
   if (loading) {
@@ -491,8 +529,6 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
   // ── Students-tab derived data (real analytics) ──
   const students = analytics?.students ?? [];
   // Enrolled students not already a TA — the candidates the owner can promote.
-  const assistantIds = new Set(assistants.map((a) => a.id));
-  const promotableStudents = students.filter((s) => !assistantIds.has(s.id));
   const avgScore = (() => {
     const scored = students.filter((s) => s.avgScore != null);
     if (scored.length === 0) return null;
@@ -611,6 +647,7 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
                   onPatch={(patch) => patchLesson(lesson.id, patch)}
                   onDelete={() => deleteLesson(lesson.id)}
                   onUpload={(files) => uploadMaterial(lesson.id, files)}
+                  onDeleteMaterial={(sourceId) => deleteMaterial(lesson.id, sourceId)}
                 />
               ))}
 
@@ -631,7 +668,7 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
         {/* ── STUDENTS TAB ── */}
         {activeTab === "students" && (
           <div className="space-y-6">
-            {/* Cohort & TA management: counts + separate invite paths. */}
+            {/* Invite students with the join code. */}
             <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
               {/* Invite Students — share the join code */}
               <div className="rounded-[24px] border border-white/70 bg-white/45 p-5 shadow-lg backdrop-blur-xl space-y-3">
@@ -657,41 +694,6 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
                 </div>
               </div>
 
-              {/* Invite TA — separate path, teacher-level access */}
-              <div className="rounded-[24px] border border-white/70 bg-white/45 p-5 shadow-lg backdrop-blur-xl space-y-3">
-                <div className="flex items-center justify-between gap-2">
-                  <h3 className="flex items-center gap-2 text-sm font-bold text-foreground font-display">
-                    <UserPlus className="w-4 h-4 text-primary" />
-                    Teaching Assistants
-                    <span className="rounded-full bg-primary/10 px-2 py-0.5 text-[11px] font-black text-primary">{assistants.length}</span>
-                  </h3>
-                  <button onClick={() => { setTaError(""); setShowInviteTA(true); }} className="flex h-9 items-center gap-1.5 rounded-xl bg-primary px-4 text-xs font-bold text-white transition-all hover:bg-primary/95 shadow shadow-primary/20 active:scale-[0.97]">
-                    <UserPlus className="w-4 h-4" />
-                    <span>Add TA</span>
-                  </button>
-                </div>
-                {assistants.length > 0 ? (
-                  <div className="space-y-2">
-                    {assistants.map((ta) => (
-                      <div key={ta.id} className="flex items-center gap-3 rounded-2xl border border-primary/10 bg-white/60 p-3">
-                        <div className="flex w-9 h-9 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-xs font-extrabold text-primary">{ta.initials}</div>
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2">
-                            <p className="text-xs font-bold text-foreground truncate">{ta.name}</p>
-                            <span className="rounded-full bg-emerald-50 px-2 py-0.5 text-[9px] font-extrabold uppercase tracking-wider text-emerald-700 border border-emerald-100">Teacher access</span>
-                          </div>
-                          <p className="text-[11px] text-muted-foreground truncate">{ta.email}</p>
-                        </div>
-                        <button onClick={() => removeTA(ta.id)} title="Remove assistant" className="flex w-8 h-8 shrink-0 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-600 transition-all hover:bg-rose-100 active:scale-95">
-                          <Trash2 className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ))}
-                  </div>
-                ) : (
-                  <p className="rounded-2xl border border-dashed border-primary/15 bg-white/20 p-4 text-center text-xs text-muted-foreground">No teaching assistants yet. Promote an enrolled student to give them teacher-level access to this course.</p>
-                )}
-              </div>
             </div>
 
             <div className="flex w-fit items-center gap-1 rounded-2xl border border-white/60 bg-white/55 p-1">
@@ -789,8 +791,8 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
                 </div>
               </div>
             ) : (
-              <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,360px)_1fr]">
-                <div className="space-y-3">
+              <div className="grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,360px)_minmax(0,1fr)]">
+                <div className="min-w-0 space-y-3">
                   <div className="flex items-center justify-between px-1">
                     <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">
                       Enrolled students
@@ -806,28 +808,37 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
                   </div>
                   <div className="space-y-2">
                     {filteredStudents.map((s) => (
-                      <button key={s.id} onClick={() => setSelectedStudentId(s.id)} className={cn("flex w-full items-center gap-3 rounded-2xl border px-4 py-3 text-left transition-all active:scale-[0.99]", selectedStudentId === s.id ? "border-primary/30 bg-primary/5 shadow-sm" : "border-white/70 bg-white/45 hover:border-primary/15 hover:bg-white/70")}>
-                        <div className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[13px] font-semibold text-white" style={{ backgroundColor: course.color }}>{initialsOf(s.name)}</div>
-                        <div className="min-w-0 flex-1">
-                          <p className="truncate text-[13px] font-bold text-[#1d1d1f]">{s.name}</p>
-                          <p className="truncate text-[11px] text-[#86868b]">{s.email}</p>
-                        </div>
-                        <span className="shrink-0 text-[12px] font-black text-foreground">{s.avgScore != null ? `${s.avgScore}%` : "—"}</span>
-                        <ChevronRight className={cn("size-4 shrink-0", selectedStudentId === s.id ? "text-primary" : "text-[#c7c7cc]")} />
-                      </button>
+                      <div key={s.id} className={cn("flex items-center gap-3 rounded-2xl border px-4 py-3 transition-all", selectedStudentId === s.id ? "border-primary/30 bg-primary/5 shadow-sm" : "border-white/70 bg-white/45 hover:border-primary/15 hover:bg-white/70")}>
+                        <button className="flex flex-1 items-center gap-3 text-left active:scale-[0.99]" onClick={() => setSelectedStudentId(s.id)}>
+                          <div className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[13px] font-semibold text-white" style={{ backgroundColor: course.color }}>{initialsOf(s.name)}</div>
+                          <div className="min-w-0 flex-1">
+                            <p className="truncate text-[13px] font-bold text-[#1d1d1f]">{s.name}</p>
+                            <p className="truncate text-[11px] text-[#86868b]">{s.email}</p>
+                          </div>
+                          <span className="shrink-0 text-[12px] font-black text-foreground">{s.avgScore != null ? `${s.avgScore}%` : "—"}</span>
+                          <ChevronRight className={cn("size-4 shrink-0", selectedStudentId === s.id ? "text-primary" : "text-[#c7c7cc]")} />
+                        </button>
+                        <button
+                          onClick={(e) => { e.stopPropagation(); setRemoveStudentError(""); setRemoveStudentId(s.id); }}
+                          title="Remove student from course"
+                          className="ml-1 flex size-8 shrink-0 items-center justify-center rounded-xl border border-rose-200 bg-rose-50 text-rose-600 transition-all hover:bg-rose-100 active:scale-95"
+                        >
+                          <Trash2 className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
                     ))}
                     {filteredStudents.length === 0 && <p className="px-1 py-6 text-center text-xs text-muted-foreground">No students match “{studentQuery}”.</p>}
                   </div>
                 </div>
 
-                <div className="liquid-panel rounded-3xl p-6 min-h-[300px]">
+                <div className="liquid-panel min-w-0 rounded-3xl p-6 min-h-[300px]">
                   {selectedStudent ? (
                     <div className="space-y-5 edsynapse-stagger">
                       <div className="flex items-center gap-3">
                         <div className="flex size-12 shrink-0 items-center justify-center rounded-2xl text-base font-bold text-white shadow" style={{ backgroundColor: course.color }}>{initialsOf(selectedStudent.name)}</div>
-                        <div className="min-w-0">
-                          <h3 className="text-lg font-black text-foreground font-display leading-tight">{selectedStudent.name}</h3>
-                          <p className="text-[11px] text-muted-foreground">{selectedStudent.email} · Active {relativeTime(selectedStudent.lastActive)}</p>
+                        <div className="min-w-0 flex-1">
+                          <h3 className="truncate text-lg font-black text-foreground font-display leading-tight">{selectedStudent.name}</h3>
+                          <p className="truncate text-[11px] text-muted-foreground">{selectedStudent.email} · Active {relativeTime(selectedStudent.lastActive)}</p>
                         </div>
                       </div>
                       <div className="grid grid-cols-3 gap-3">
@@ -1005,41 +1016,62 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
         </div>
       )}
 
-      {/* ── INVITE TA MODAL ── */}
-      {showInviteTA && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm animate-in fade-in">
-          <div className="absolute inset-0" onClick={() => setShowInviteTA(false)} />
-          <div className="liquid-shell relative w-full max-w-md overflow-hidden rounded-[34px] p-3 shadow-2xl edsynapse-stagger">
-            <div className="rounded-[26px] border border-white/70 bg-[#fbfbfd]/92 p-6 shadow-inner backdrop-blur-2xl space-y-5">
-              <button onClick={() => setShowInviteTA(false)} className="absolute right-6 top-6 flex w-8 h-8 items-center justify-center rounded-full text-muted-foreground hover:bg-black/5 hover:text-foreground transition-all"><X className="w-4 h-4" strokeWidth={2.5} /></button>
-              <div className="space-y-1">
-                <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/25 bg-primary/5 px-3 py-1.5 text-[10px] font-extrabold tracking-wider uppercase text-primary"><UserPlus className="w-3.5 h-3.5" /> Promote Assistant</span>
-                <h2 className="text-2xl font-bold font-display text-foreground leading-tight pt-1">Add a Teaching Assistant</h2>
-                <p className="text-xs text-muted-foreground">Pick an enrolled student to give them teacher-level access to <strong className="text-foreground">{course.name}</strong>. They keep their student access in other courses.</p>
-              </div>
-              {taError && <p className="text-[11px] font-medium text-rose-600">{taError}</p>}
-              {!analytics ? (
-                <div className="flex items-center justify-center gap-2 py-8 text-xs text-muted-foreground"><Loader2 className="w-4 h-4 animate-spin" /> Loading roster…</div>
-              ) : promotableStudents.length === 0 ? (
-                <p className="rounded-2xl border border-dashed border-primary/15 bg-white/40 p-5 text-center text-xs text-muted-foreground">No students available to promote. Students must join with the class code <span className="font-mono font-bold text-primary">{course.code}</span> first.</p>
-              ) : (
-                <div className="max-h-72 space-y-2 overflow-y-auto pr-1">
-                  {promotableStudents.map((s) => (
-                    <button key={s.id} type="button" onClick={() => promoteTA(s.id)} className="flex w-full items-center gap-3 rounded-2xl border border-primary/10 bg-white/70 p-3 text-left transition-all hover:border-primary/30 hover:bg-white active:scale-[0.99]">
-                      <div className="flex size-9 shrink-0 items-center justify-center rounded-xl text-[13px] font-semibold text-white" style={{ backgroundColor: course.color }}>{initialsOf(s.name)}</div>
-                      <div className="min-w-0 flex-1">
-                        <p className="truncate text-xs font-bold text-foreground">{s.name}</p>
-                        <p className="truncate text-[11px] text-muted-foreground">{s.email}</p>
-                      </div>
-                      <span className="shrink-0 rounded-lg bg-primary/10 px-2.5 py-1 text-[10px] font-extrabold uppercase tracking-wide text-primary">Promote</span>
-                    </button>
-                  ))}
+      {/* ── REMOVE STUDENT CONFIRMATION MODAL ── */}
+      {removeStudentId && (() => {
+        const target = students.find((s) => s.id === removeStudentId);
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/35 p-4 backdrop-blur-sm animate-in fade-in">
+            <div className="absolute inset-0" onClick={() => { if (!removeStudentBusy) setRemoveStudentId(null); }} />
+            <div className="liquid-shell relative w-full max-w-sm overflow-hidden rounded-[34px] p-3 shadow-2xl edsynapse-stagger">
+              <div className="rounded-[26px] border border-white/70 bg-[#fbfbfd]/92 p-6 shadow-inner backdrop-blur-2xl space-y-4">
+                <button
+                  onClick={() => { if (!removeStudentBusy) setRemoveStudentId(null); }}
+                  className="absolute right-6 top-6 flex w-8 h-8 items-center justify-center rounded-full text-muted-foreground hover:bg-black/5 hover:text-foreground transition-all"
+                >
+                  <X className="w-4 h-4" strokeWidth={2.5} />
+                </button>
+
+                <div className="flex size-12 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
+                  <Trash2 className="w-5 h-5" />
                 </div>
-              )}
+
+                <div className="space-y-1">
+                  <h2 className="text-xl font-bold font-display text-foreground leading-tight">Remove Student</h2>
+                  <p className="text-xs text-muted-foreground">
+                    Are you sure you want to remove{" "}
+                    <strong className="text-foreground">{target?.name ?? "this student"}</strong>{" "}
+                    from <strong className="text-foreground">{course.name}</strong>? Their enrollment will be deleted. This action cannot be undone.
+                  </p>
+                </div>
+
+                {removeStudentError && (
+                  <p className="rounded-xl border border-rose-200 bg-rose-50 px-3 py-2 text-[11px] font-medium text-rose-600">
+                    {removeStudentError}
+                  </p>
+                )}
+
+                <div className="flex gap-2 pt-1">
+                  <button
+                    onClick={() => setRemoveStudentId(null)}
+                    disabled={removeStudentBusy}
+                    className="flex-1 rounded-xl border border-black/10 bg-white/80 py-2.5 text-xs font-bold text-foreground transition hover:bg-white disabled:opacity-50"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={() => removeStudent(removeStudentId)}
+                    disabled={removeStudentBusy}
+                    className="flex flex-1 items-center justify-center gap-1.5 rounded-xl bg-rose-600 py-2.5 text-xs font-bold text-white shadow shadow-rose-600/25 transition hover:bg-rose-700 active:scale-[0.97] disabled:opacity-60"
+                  >
+                    {removeStudentBusy ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                    Remove Student
+                  </button>
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
     </div>
   );
 }

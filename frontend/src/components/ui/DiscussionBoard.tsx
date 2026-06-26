@@ -24,7 +24,6 @@ function relativeTime(iso: string): string {
 
 const ROLE_BADGE: Record<DiscussionAuthorRole, { label: string; cls: string }> = {
   teacher: { label: "Teacher", cls: "bg-primary/10 text-primary border-primary/15" },
-  ta: { label: "TA", cls: "bg-violet-500/10 text-violet-700 border-violet-200" },
   student: { label: "Student", cls: "bg-black/5 text-muted-foreground border-black/10" },
 };
 
@@ -38,7 +37,7 @@ function RoleBadge({ role }: { role: DiscussionAuthorRole }) {
 }
 
 function Avatar({ initials, role }: { initials: string; role: DiscussionAuthorRole }) {
-  const tone = role === "teacher" ? "bg-primary" : role === "ta" ? "bg-violet-500" : "bg-slate-400";
+  const tone = role === "teacher" ? "bg-primary" : "bg-slate-400";
   return (
     <div className={cn("flex size-8 shrink-0 items-center justify-center rounded-xl text-[11px] font-bold text-white", tone)}>
       {initials}
@@ -201,7 +200,7 @@ export function DiscussionBoard({ courseId }: { courseId: string }) {
           </div>
           <p className="text-[10px] text-muted-foreground">
             {visibility === "private"
-              ? "Private — only you, the teacher, and TAs can see this."
+              ? "Private — only you and the teacher can see this."
               : "Public — everyone enrolled can see and reply."}
           </p>
         </div>

@@ -17,6 +17,10 @@ const securityHeaders = [
 ];
 
 const nextConfig: NextConfig = {
+  // Pin the workspace root to this folder. The repo has lockfiles at both the
+  // root and here (frontend/), so without this Turbopack guesses the wrong root
+  // and warns. The app lives entirely under frontend/.
+  turbopack: { root: __dirname },
   // Keep native/server-only packages out of the client/runtime bundle.
   serverExternalPackages: ["pg", "@aws-sdk/rds-signer", "@aws-sdk/client-rds", "unpdf", "mammoth", "xlsx"],
   async headers() {

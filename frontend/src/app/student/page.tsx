@@ -172,11 +172,11 @@ export default function StudentDashboard() {
 
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href="/student/knowledge-map"
+              href="/student/strengths-gaps"
               className="flex h-9 items-center gap-1.5 rounded-xl border border-primary/15 bg-white/70 px-3 text-xs font-bold text-primary transition-all hover:bg-white active:scale-[0.97]"
             >
               <BookMarked className="w-3.5 h-3.5" />
-              <span>Knowledge Map</span>
+              <span>Strengths & Gaps</span>
             </Link>
 
             <button

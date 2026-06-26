@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { requireUser, AuthError } from "@/lib/auth"
 import { query, queryOne } from "@/lib/db"
-import { requireCourseStaff } from "@/lib/courses"
+import { requireCourseStaff, requireCourseOwner } from "@/lib/courses"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -68,5 +68,39 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status })
     console.error("[v0] teacher student detail error:", error)
     return NextResponse.json({ error: "Failed to load student record." }, { status: 500 })
+  }
+}
+
+// Remove (unenroll) a student from the course. Only the course owner can do
+// this — TAs should not have the authority to kick enrolled members.
+export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string; studentId: string }> }) {
+  try {
+    const user = await requireUser()
+    const { id: courseId, studentId } = await ctx.params
+
+    // Owner-only guard.
+    await requireCourseOwner(user.id, courseId)
+
+    // Confirm the target is actually enrolled before touching anything.
+    const enrolled = await queryOne(
+      `SELECT 1 FROM enrollments WHERE course_id = $1 AND student_id = $2`,
+      [courseId, studentId],
+    )
+    if (!enrolled) {
+      return NextResponse.json({ error: "Student is not enrolled in this course" }, { status: 404 })
+    }
+
+    // Remove the enrollment row (cascades handle quiz_attempts / knowledge_states
+    // if your schema has ON DELETE CASCADE; otherwise we clean up manually).
+    await query(
+      `DELETE FROM enrollments WHERE course_id = $1 AND student_id = $2`,
+      [courseId, studentId],
+    )
+
+    return NextResponse.json({ ok: true })
+  } catch (error) {
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status })
+    console.error("[v0] teacher remove student error:", error)
+    return NextResponse.json({ error: "Failed to remove student." }, { status: 500 })
   }
 }

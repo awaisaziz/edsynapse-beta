@@ -11,6 +11,13 @@ export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 export const maxDuration = 60
 
+// Remove NUL (0x00) bytes — PostgreSQL TEXT can't store them, and PDF/DOCX text
+// extraction occasionally produces them, which otherwise aborts the INSERT.
+function stripNul(s: string): string {
+  // eslint-disable-next-line no-control-regex
+  return s.split(String.fromCharCode(0)).join("");
+}
+
 // Fallback MIME when the browser doesn't supply one, keyed by our detected type.
 function mimeForType(type: string): string {
   switch (type) {
@@ -36,7 +43,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     const user = await requireUser()
     const { id: courseId } = await ctx.params
 
-    // Owner (incl. self-study owner) or a course assistant may add material.
+    // Owner (incl. self-study owner) may add material.
     await requireCourseStaff(user.id, courseId)
 
     // Publish gating: in a class, new material is UNPUBLISHED by default so
@@ -68,7 +75,7 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     // but NOT written to the lesson outline yet (confirmed via the lessons PATCH).
     const applyTopics = form.get("applyTopics") !== "false"
     const files = form.getAll("files").filter((f): f is File => f instanceof File)
-    const pastedText = (form.get("text") as string) || ""
+    const pastedText = stripNul((form.get("text") as string) || "")
     const pastedTitle = (form.get("title") as string) || "Pasted notes"
 
     const ingested: { id: string; title: string; type: string; chunks: number }[] = []
@@ -83,6 +90,10 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
       } catch (e) {
         console.error("[v0] parse error for", file.name, e)
       }
+      // PostgreSQL TEXT columns reject NUL (0x00) bytes, which scanned/encoded
+      // PDFs sometimes leave in extracted text (→ "invalid byte sequence for
+      // UTF8: 0x00"). Strip them before storing/embedding.
+      text = stripNul(text)
       combinedText += `\n\n${text}`
       const sourceId = `src_${nanoid(14)}`
       // Persist the original bytes (+ MIME) so the Course tab can hand the file
@@ -110,13 +121,13 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
     }
 
     // Optional: extract a curriculum topic list from the uploaded material.
-    // Single source → 2-5 topics; multiple sources → 3 per source so coverage
+    // Single source → 2-4 topics; multiple sources → 3 per source so coverage
     // scales with how much material was uploaded.
     let topics: string[] = []
     if (wantTopics && combinedText.trim().length > 40) {
       const sourceCount = ingested.length
-      const target = sourceCount > 1 ? sourceCount * 3 : "2-5"
-      const maxTopics = sourceCount > 1 ? sourceCount * 3 : 5
+      const target = sourceCount > 1 ? sourceCount * 3 : "2-4"
+      const maxTopics = sourceCount > 1 ? sourceCount * 3 : 4
       try {
         const result = await generateJSON<{ topics: string[] }>(
           [
@@ -166,17 +177,28 @@ export async function POST(req: NextRequest, ctx: { params: Promise<{ id: string
   } catch (error) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status })
     console.error("[v0] source upload error:", error)
-    return NextResponse.json({ error: "Failed to ingest source material." }, { status: 500 })
+    const detail = error instanceof Error ? error.message : String(error)
+    // Surface the underlying reason (expired DB token, OpenAI/embedding failure,
+    // parse error, …) instead of a blanket message — this is a staff-only route.
+    const expired = /ExpiredToken|expired/i.test(detail)
+    return NextResponse.json(
+      {
+        error: expired
+          ? "Database session expired. Re-pull your dev env (vercel env pull) and restart, then retry."
+          : `Failed to ingest source material: ${detail}`,
+      },
+      { status: 500 },
+    )
   }
 }
 
-// List sources for a course. Course staff (owner or assistant) see every source
+// List sources for a course. The course owner sees every source
 // with its published flag; enrolled students see published ones only.
 export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string }> }) {
   try {
     const user = await requireUser()
     const { id: courseId } = await ctx.params
-    // Any member (student/assistant/owner) may list; non-members are rejected.
+    // Any member (student/owner) may list; non-members are rejected.
     // Without this an authed user could list any course's source titles by id.
     const role = await getCourseRole(user.id, courseId)
     if (role === null) {

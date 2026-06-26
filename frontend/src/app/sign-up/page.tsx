@@ -2,11 +2,10 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { ArrowRight, GraduationCap, User, Check, X } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { ArrowRight, GraduationCap, User, Check, X, MailCheck } from "lucide-react";
 import { Navbar } from "@/components/landing/Navbar";
 import { cn } from "@/lib/utils";
-import { register } from "@/lib/useAuth";
+import { register, resendVerification } from "@/lib/useAuth";
 
 // Password policy — kept in sync with validatePassword() in src/lib/auth.ts.
 const PASSWORD_RULES = [
@@ -17,7 +16,6 @@ const PASSWORD_RULES = [
 ];
 
 export default function SignUpPage() {
-  const router = useRouter();
   const [role, setRole] = useState<"student" | "teacher">("student");
   const [firstName, setFirstName] = useState("");
   const [lastName, setLastName] = useState("");
@@ -26,6 +24,8 @@ export default function SignUpPage() {
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [sent, setSent] = useState(false);
+  const [resent, setResent] = useState(false);
 
   const passwordValid = useMemo(() => PASSWORD_RULES.every((r) => r.test(password)), [password]);
   const passwordsMatch = password.length > 0 && password === confirmPassword;
@@ -38,19 +38,26 @@ export default function SignUpPage() {
     setLoading(true);
     setError("");
     try {
-      const user = await register({
+      await register({
         firstName: firstName.trim(),
         lastName: lastName.trim(),
         email: email.trim(),
         password,
         role,
       });
-      // New accounts must complete onboarding before reaching their dashboard.
-      router.push(user.onboarded ? (user.role === "teacher" ? "/teacher/dashboard" : "/student") : "/onboarding");
+      // Account created but not active yet — the user must confirm their email
+      // before they can sign in. Show the "check your inbox" screen.
+      setSent(true);
+      setLoading(false);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Sign up failed.");
       setLoading(false);
     }
+  };
+
+  const handleResend = async () => {
+    await resendVerification(email.trim());
+    setResent(true);
   };
 
   return (
@@ -60,6 +67,40 @@ export default function SignUpPage() {
       <Navbar />
 
       <main className="relative z-10 flex min-h-[100dvh] items-center justify-center px-4 py-24">
+        {sent ? (
+          <div className="w-full max-w-md">
+            <div className="liquid-shell rounded-[34px] p-3">
+              <div className="rounded-[26px] border border-white/70 bg-[#fbfbfd]/76 p-8 text-center shadow-[inset_0_1px_0_rgba(255,255,255,0.96)] backdrop-blur-2xl">
+                <div className="mx-auto mb-5 flex size-14 items-center justify-center rounded-full bg-[#0066cc]/10 text-[#0066cc]">
+                  <MailCheck className="size-7" strokeWidth={1.8} />
+                </div>
+                <h1 className="mb-2 text-[26px] font-semibold tracking-[-0.02em]">Check your inbox</h1>
+                <p className="mb-6 text-[15px] leading-7 text-[#6e6e73]">
+                  We sent a verification link to <strong className="text-[#1d1d1f]">{email}</strong>. Click
+                  it to activate your account, then sign in. The link expires in 24 hours.
+                </p>
+                <Link
+                  href="/sign-in"
+                  className="inline-flex h-12 w-full items-center justify-center gap-2 rounded-full bg-[#0066cc] text-[15px] font-medium text-white transition-all duration-150 hover:bg-[#0071e3] active:scale-[0.97]"
+                >
+                  Go to sign in
+                  <ArrowRight className="size-4" strokeWidth={1.8} />
+                </Link>
+                <button
+                  type="button"
+                  onClick={handleResend}
+                  disabled={resent}
+                  className="mt-4 text-[13px] text-[#0066cc] transition hover:underline disabled:text-[#86868b] disabled:no-underline"
+                >
+                  {resent ? "Verification email resent." : "Didn't get it? Resend email"}
+                </button>
+                <p className="mt-3 text-[12px] text-[#86868b]">
+                  Check your spam folder if it doesn&apos;t arrive within a minute.
+                </p>
+              </div>
+            </div>
+          </div>
+        ) : (
         <div className="w-full max-w-md">
           <h1 className="mb-2 text-center text-[40px] font-semibold leading-[1.05] tracking-[-0.025em]">
             Create an account.
@@ -219,6 +260,7 @@ export default function SignUpPage() {
             </div>
           </div>
         </div>
+        )}
       </main>
     </div>
   );

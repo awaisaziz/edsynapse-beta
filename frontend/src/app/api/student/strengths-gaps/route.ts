@@ -5,7 +5,7 @@ import { getKnowledgeMap } from "@/lib/knowledge"
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-// The signed-in student's knowledge map (optionally scoped to ?course_id=).
+// The signed-in student's strengths & gaps (optionally scoped to ?course_id=).
 export async function GET(req: NextRequest) {
   try {
     const user = await requireUser("student")
@@ -14,7 +14,7 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ student_id: user.id, ...map })
   } catch (error) {
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status })
-    console.error("[v0] knowledge map error:", error)
-    return NextResponse.json({ error: "Failed to load knowledge map." }, { status: 500 })
+    console.error("[v0] strengths & gaps error:", error)
+    return NextResponse.json({ error: "Failed to load strengths & gaps." }, { status: 500 })
   }
 }

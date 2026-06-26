@@ -4,14 +4,15 @@ import React, { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { AppShell } from "@/components/ui/AppShell";
 import { ProgressRing } from "@/components/ui/ProgressRing";
-import { KnowledgeMapChart } from "@/components/ui/KnowledgeMapChart";
-import { type KnowledgeMapTopic, type TopicMastery } from "@/lib/knowledgeMap";
+import { StrengthsGapsChart } from "@/components/ui/StrengthsGapsChart";
+import { type StrengthsGapsTopic, type TopicMastery } from "@/lib/strengthsGaps";
 import { studentApi, type Course, type TopicStatus } from "@/lib/edsynapseApi";
 import {
   Sparkles,
   ArrowRight,
   TrendingUp,
   AlertTriangle,
+  ArrowDownUp,
 } from "lucide-react";
 
 const LEVEL_SCORE: Record<TopicMastery, number> = {
@@ -20,7 +21,7 @@ const LEVEL_SCORE: Record<TopicMastery, number> = {
   needs_improvement: 32,
 };
 
-function toChartTopic(t: TopicStatus, i: number): KnowledgeMapTopic {
+function toChartTopic(t: TopicStatus, i: number): StrengthsGapsTopic {
   return {
     id: `km_${i}`,
     topic: t.topic,
@@ -31,14 +32,14 @@ function toChartTopic(t: TopicStatus, i: number): KnowledgeMapTopic {
   };
 }
 
-function KnowledgeMapInner() {
+function StrengthsGapsInner() {
   const router = useRouter();
   // Optional deep link: ?course=<id> pre-selects that course (e.g. opened from a
-  // class page's "Knowledge map" button) instead of defaulting to the first.
+  // class page's "Strengths & Gaps" button) instead of defaulting to the first.
   const preferredCourseId = useSearchParams().get("course");
   const [courses, setCourses] = useState<Course[]>([]);
   const [activeCourse, setActiveCourse] = useState<Course | null>(null);
-  const [topics, setTopics] = useState<KnowledgeMapTopic[]>([]);
+  const [topics, setTopics] = useState<StrengthsGapsTopic[]>([]);
   const [overall, setOverall] = useState(0);
   const [loading, setLoading] = useState(true);
 
@@ -57,7 +58,7 @@ function KnowledgeMapInner() {
       .finally(() => setLoading(false));
   }, [preferredCourseId]);
 
-  // Load the knowledge map for the active course.
+  // Load the strengths & gaps for the active course.
   useEffect(() => {
     if (!activeCourse) {
       setTopics([]);
@@ -65,7 +66,7 @@ function KnowledgeMapInner() {
       return;
     }
     studentApi
-      .getKnowledgeMap(activeCourse.id)
+      .getStrengthsGaps(activeCourse.id)
       .then((km) => {
         setTopics(km.topics.map(toChartTopic));
         setOverall(Math.round(km.overall_mastery));
@@ -81,6 +82,15 @@ function KnowledgeMapInner() {
     const moderate = topics.filter((t) => t.status === "moderate");
     return weak[0] ?? moderate[0] ?? topics[0] ?? null;
   }, [topics]);
+
+  // Concept breakdown ordering. Default puts the weakest topics on top (lowest
+  // mastery first) so the student immediately sees what to work on next; the
+  // toggle flips it to strongest-first.
+  const [weakestFirst, setWeakestFirst] = useState(true);
+  const sortedTopics = useMemo(() => {
+    const byScore = [...topics].sort((a, b) => a.score - b.score);
+    return weakestFirst ? byScore : byScore.reverse();
+  }, [topics, weakestFirst]);
 
   const handleAction = (topicId: string, actionType: "tutor" | "quiz" | "review") => {
     const topic = topics.find((t) => t.id === topicId);
@@ -102,7 +112,7 @@ function KnowledgeMapInner() {
         {/* Page Header */}
         <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
           <div className="space-y-1">
-            <h1 className="text-2xl font-bold text-foreground font-display tracking-tight">My Knowledge Map</h1>
+            <h1 className="text-2xl font-bold text-foreground font-display tracking-tight">Strengths &amp; Gaps</h1>
             <p className="text-xs text-muted-foreground">
               A real-time diagnosis of your concept mastery, updated as you study.
             </p>
@@ -133,7 +143,7 @@ function KnowledgeMapInner() {
             <div className="space-y-2">
               <h2 className="text-base font-bold text-foreground font-display">No courses yet</h2>
               <p className="text-xs text-muted-foreground">
-                Join a class or start a self-study course to begin building your knowledge map.
+                Join a class or start a self-study course to begin building your strengths &amp; gaps.
               </p>
             </div>
             <div className="flex flex-wrap items-center justify-center gap-3 pt-2">
@@ -237,13 +247,24 @@ function KnowledgeMapInner() {
                 <h3 className="text-sm font-bold text-foreground font-display uppercase tracking-wider">
                   Concept Mastery Breakdown
                 </h3>
-                <span className="text-xs text-muted-foreground font-semibold flex items-center gap-1">
-                  <TrendingUp className="w-3.5 h-3.5" />
-                  {topics.length} topics mapped
-                </span>
+                <div className="flex items-center gap-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setWeakestFirst((v) => !v)}
+                    title="Reverse the order"
+                    className="flex items-center gap-1.5 rounded-xl border border-primary/15 bg-white/60 px-2.5 py-1.5 text-xs font-bold text-foreground transition-all hover:bg-white active:scale-[0.97]"
+                  >
+                    <ArrowDownUp className="w-3.5 h-3.5" />
+                    <span>{weakestFirst ? "Weakest first" : "Strongest first"}</span>
+                  </button>
+                  <span className="hidden text-xs text-muted-foreground font-semibold sm:flex items-center gap-1">
+                    <TrendingUp className="w-3.5 h-3.5" />
+                    {topics.length} topics mapped
+                  </span>
+                </div>
               </div>
 
-              <KnowledgeMapChart topics={topics} onAction={handleAction} showActions={true} />
+              <StrengthsGapsChart topics={sortedTopics} onAction={handleAction} showActions={true} />
             </div>
           </>
         )}
@@ -252,12 +273,12 @@ function KnowledgeMapInner() {
   );
 }
 
-export default function KnowledgeMapPage() {
+export default function StrengthsGapsPage() {
   // useSearchParams() requires a Suspense boundary to keep this route from
   // bailing out of static rendering at build time.
   return (
     <Suspense fallback={null}>
-      <KnowledgeMapInner />
+      <StrengthsGapsInner />
     </Suspense>
   );
 }

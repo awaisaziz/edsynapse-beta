@@ -3,33 +3,27 @@ import { query, queryOne } from "@/lib/db";
 
 /**
  * Course discussion board (Piazza-style). Access rules:
- *  - Members are the course owner (teacher), active TAs, and enrolled students.
+ *  - Members are the course owner (teacher) and enrolled students.
  *  - Public threads are visible to all members.
- *  - Private threads are visible only to their author plus the teacher and TAs.
+ *  - Private threads are visible only to their author plus the teacher.
  * SERVER ONLY.
  */
 
-export type CourseRole = "owner" | "ta" | "student" | "none";
+export type CourseRole = "owner" | "student" | "none";
 
 /** How a user relates to a course — drives both access and visibility filtering. */
 export async function resolveCourseRole(courseId: string, userId: string): Promise<CourseRole> {
   const course = await queryOne<{ owner_id: string }>(`SELECT owner_id FROM courses WHERE id = $1`, [courseId]);
   if (!course) return "none";
   if (course.owner_id === userId) return "owner";
-  // TA = an enrolled member promoted to 'assistant' (course-scoped, per the
-  // enrollments.role model). Anyone else enrolled is a plain student.
-  const enr = await queryOne<{ role: "student" | "assistant" }>(
-    `SELECT role FROM enrollments WHERE course_id = $1 AND student_id = $2`,
-    [courseId, userId],
-  );
-  if (!enr) return "none";
-  return enr.role === "assistant" ? "ta" : "student";
+  const enr = await queryOne(`SELECT 1 FROM enrollments WHERE course_id = $1 AND student_id = $2`, [courseId, userId]);
+  return enr ? "student" : "none";
 }
 
-export const isStaff = (role: CourseRole) => role === "owner" || role === "ta";
+export const isStaff = (role: CourseRole) => role === "owner";
 export const isMember = (role: CourseRole) => role !== "none";
 
-export type AuthorRole = "teacher" | "ta" | "student";
+export type AuthorRole = "teacher" | "student";
 
 export interface DiscussionAuthor {
   id: string;
@@ -104,7 +98,6 @@ const THREAD_SELECT = `
   u.id AS author_id, u.name AS author_name,
   CASE
     WHEN d.author_id = c.owner_id THEN 'teacher'
-    WHEN EXISTS (SELECT 1 FROM enrollments e WHERE e.course_id = d.course_id AND e.student_id = d.author_id AND e.role = 'assistant') THEN 'ta'
     ELSE 'student'
   END AS author_role,
   (SELECT count(*) FROM discussion_posts p WHERE p.discussion_id = d.id)::int AS reply_count
@@ -160,7 +153,6 @@ export async function getDiscussion(
             u.id AS author_id, u.name AS author_name,
             CASE
               WHEN p.author_id = c.owner_id THEN 'teacher'
-              WHEN EXISTS (SELECT 1 FROM enrollments e WHERE e.course_id = c.id AND e.student_id = p.author_id AND e.role = 'assistant') THEN 'ta'
               ELSE 'student'
             END AS author_role
        FROM discussion_posts p

@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
 import { query, queryOne } from "@/lib/db"
 import { requireUser, AuthError } from "@/lib/auth"
+import { requireCourseStaff } from "@/lib/courses"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -33,18 +34,14 @@ export async function GET(_req: NextRequest, ctx: { params: Promise<{ id: string
   }
 }
 
-// Publish/unpublish a source — course owner (teacher) only. Unpublished material
+// Publish/unpublish a source — course owner only. Unpublished material
 // is hidden from students and excluded from RAG grounding.
 export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: string; sourceId: string }> }) {
   try {
     const user = await requireUser()
     const { id: courseId, sourceId } = await ctx.params
 
-    const course = await queryOne<{ owner_id: string }>(`SELECT owner_id FROM courses WHERE id = $1`, [courseId])
-    if (!course) return NextResponse.json({ error: "Course not found" }, { status: 404 })
-    if (course.owner_id !== user.id) {
-      return NextResponse.json({ error: "Only the course owner can publish material." }, { status: 403 })
-    }
+    await requireCourseStaff(user.id, courseId)
 
     const body = (await req.json()) as { published?: unknown }
     if (typeof body.published !== "boolean") {
@@ -62,5 +59,27 @@ export async function PATCH(req: NextRequest, ctx: { params: Promise<{ id: strin
     if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status })
     console.error("[v0] update source publish error:", error)
     return NextResponse.json({ error: "Failed to update material." }, { status: 500 })
+  }
+}
+
+// Delete a source material and all its RAG chunks (cascaded by db). Course staff only.
+export async function DELETE(_req: NextRequest, ctx: { params: Promise<{ id: string; sourceId: string }> }) {
+  try {
+    const user = await requireUser()
+    const { id: courseId, sourceId } = await ctx.params
+
+    await requireCourseStaff(user.id, courseId)
+
+    const deleted = await queryOne<{ id: string }>(
+      `DELETE FROM sources WHERE id = $1 AND course_id = $2 RETURNING id`,
+      [sourceId, courseId],
+    )
+    if (!deleted) return NextResponse.json({ error: "Source not found" }, { status: 404 })
+
+    return NextResponse.json({ ok: true })
+  } catch (error) {
+    if (error instanceof AuthError) return NextResponse.json({ error: error.message }, { status: error.status })
+    console.error("[v0] delete source error:", error)
+    return NextResponse.json({ error: "Failed to delete material." }, { status: 500 })
   }
 }

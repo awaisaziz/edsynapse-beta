@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server"
-import { query } from "@/lib/db"
+import { query, queryOne } from "@/lib/db"
 import { consumeToken } from "@/lib/authTokens"
+import { createSession } from "@/lib/auth"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
@@ -17,7 +18,19 @@ export async function POST(req: NextRequest) {
     }
 
     await query(`UPDATE users SET email_verified = true WHERE id = $1`, [userId])
-    return NextResponse.json({ ok: true })
+
+    // The token proves the user owns this inbox, so log them in here and route
+    // them straight into onboarding — no need to re-enter their password.
+    await createSession(userId)
+    const user = await queryOne<{ role: string; onboarded: boolean }>(
+      `SELECT role, onboarded FROM users WHERE id = $1`,
+      [userId],
+    )
+    return NextResponse.json({
+      ok: true,
+      role: user?.role ?? "student",
+      onboarded: Boolean(user?.onboarded),
+    })
   } catch (error) {
     console.error("[v0] verify-email error:", error)
     return NextResponse.json({ error: "Failed to verify email." }, { status: 500 })

@@ -24,11 +24,11 @@ export function InteractiveDemo() {
   return (
     <div className="w-full">
       {/* Tab controls */}
-      <div className="mb-3 flex items-center justify-between gap-1.5 rounded-full border border-white/60 bg-white/45 p-1 shadow-sm backdrop-blur-xl">
-        <div className="flex flex-1 gap-1">
+      <div className="mb-4 flex items-center justify-between gap-2 rounded-full border border-white/60 bg-white/45 p-1.5 shadow-sm backdrop-blur-xl">
+        <div className="flex flex-1 gap-1.5">
           <button
             onClick={() => setActiveTab("ingest")}
-            className={`flex-1 cursor-pointer rounded-full px-3 py-2.5 text-xs font-bold tracking-tight transition-all md:text-sm ${
+            className={`flex-1 cursor-pointer rounded-full px-4 py-3 text-[13px] font-bold tracking-tight transition-all md:text-[15px] ${
               activeTab === "ingest"
                 ? "bg-[#0066cc] text-white shadow-[0_4px_12px_rgba(0,102,204,0.25)]"
                 : "text-[#6e6e73] hover:bg-white/50"
@@ -38,7 +38,7 @@ export function InteractiveDemo() {
           </button>
           <button
             onClick={() => setActiveTab("tutor")}
-            className={`flex-1 cursor-pointer rounded-full px-3 py-2.5 text-xs font-bold tracking-tight transition-all md:text-sm ${
+            className={`flex-1 cursor-pointer rounded-full px-4 py-3 text-[13px] font-bold tracking-tight transition-all md:text-[15px] ${
               activeTab === "tutor"
                 ? "bg-[#0066cc] text-white shadow-[0_4px_12px_rgba(0,102,204,0.25)]"
                 : "text-[#6e6e73] hover:bg-white/50"
@@ -48,7 +48,7 @@ export function InteractiveDemo() {
           </button>
           <button
             onClick={() => setActiveTab("analytics")}
-            className={`flex-1 cursor-pointer rounded-full px-3 py-2.5 text-xs font-bold tracking-tight transition-all md:text-sm ${
+            className={`flex-1 cursor-pointer rounded-full px-4 py-3 text-[13px] font-bold tracking-tight transition-all md:text-[15px] ${
               activeTab === "analytics"
                 ? "bg-[#0066cc] text-white shadow-[0_4px_12px_rgba(0,102,204,0.25)]"
                 : "text-[#6e6e73] hover:bg-white/50"
@@ -60,18 +60,18 @@ export function InteractiveDemo() {
       </div>
 
       {/* Main simulator card shell */}
-      <div className="liquid-shell relative min-h-[420px] overflow-hidden rounded-[34px] p-4 transition-all duration-300 sm:p-5">
+      <div className="liquid-shell relative min-h-[460px] overflow-hidden rounded-[34px] p-6 transition-all duration-300">
         
         {/* ─── TAB 1: SMART INGEST (THE ENGINE) ─── */}
         {activeTab === "ingest" && (
           <div className="relative flex flex-col h-full edsynapse-stagger text-left">
             {/* Header */}
-            <div className="mb-4 flex items-center justify-between border-b border-[#1d1d1f]/5 pb-3">
+            <div className="mb-5 flex items-center justify-between border-b border-[#1d1d1f]/5 pb-3.5">
               <div>
-                <span className="text-[10px] font-bold uppercase tracking-wider text-[#6e6e73]">Stage 01 — Grounded Engine</span>
-                <h2 className="text-[17px] font-bold tracking-tight text-slate-900">Ingesting Syllabus Material</h2>
+                <span className="text-[11px] font-bold uppercase tracking-wider text-[#6e6e73]">Stage 01 — Grounded Engine</span>
+                <h2 className="text-[19px] font-bold tracking-tight text-slate-900">Ingesting Syllabus Material</h2>
               </div>
-              <span className="rounded-full bg-blue-500/10 px-2.5 py-0.5 text-[10px] font-bold text-[#0066cc] animate-pulse">
+              <span className="rounded-full bg-blue-500/10 px-3 py-1 text-[11px] font-bold text-[#0066cc] animate-pulse">
                 Parsing & Embedding...
               </span>
             </div>

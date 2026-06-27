@@ -19,7 +19,7 @@ export function Navbar({ variant = "glass" }: NavbarProps) {
     <nav className="fixed inset-x-0 top-0 z-50 px-4 py-4 sm:px-6">
       <div
         className={cn(
-          "mx-auto flex h-14 max-w-[1440px] items-center justify-between rounded-full px-4 backdrop-blur-2xl shadow-sm transition-all duration-300",
+          "mx-auto flex h-[72px] max-w-[1440px] items-center justify-between rounded-full px-8 backdrop-blur-2xl shadow-sm transition-all duration-300",
           variant === "glass"
             ? "border border-white/70 bg-white/58 shadow-[inset_0_1px_0_rgba(255,255,255,0.92),0_18px_60px_rgba(29,29,31,0.08)]"
             : variant === "dark"
@@ -27,27 +27,27 @@ export function Navbar({ variant = "glass" }: NavbarProps) {
             : "border border-black/5 bg-white/95 text-foreground"
         )}
       >
-        <Link href="/" className="flex items-center gap-2.5 pl-1">
-          <div className="relative flex size-8 items-center justify-center overflow-hidden rounded-lg">
+        <Link href="/" className="flex items-center gap-3.5 pl-1">
+          <div className="relative flex size-10 items-center justify-center overflow-hidden rounded-lg">
             <Image
               src="/logo.png"
               alt="EdSynapse Logo"
               fill
-              sizes="32px"
+              sizes="40px"
               priority
               className="object-contain"
             />
           </div>
-          <span className="text-base font-bold tracking-tight text-foreground font-display">
+          <span className="text-[22px] font-bold tracking-tight text-foreground font-display">
             EdSynapse
           </span>
-          <span className="ml-2 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-primary">
+          <span className="ml-2 rounded-full border border-primary/20 bg-primary/10 px-2 py-0.5 text-[11.5px] font-bold uppercase tracking-wide text-primary">
             Beta version
           </span>
         </Link>
 
         {/* Center nav links */}
-        <div className="hidden items-center gap-6 text-xs font-bold text-muted-foreground md:flex">
+        <div className="hidden items-center gap-8 text-[16px] font-bold text-muted-foreground md:flex">
           <Link href="/#how-it-works" className="transition-colors hover:text-foreground">
             How it works
           </Link>
@@ -74,16 +74,16 @@ export function Navbar({ variant = "glass" }: NavbarProps) {
         </div>
 
         {/* Public CTAs — always Sign in / Sign up; no session awareness here. */}
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-3">
           <Link
             href="/sign-in"
-            className="flex h-9 items-center gap-1.5 rounded-full border border-primary/10 bg-white/70 px-4 text-xs font-bold text-primary transition-all duration-150 hover:bg-white active:scale-[0.97]"
+            className="flex h-12 items-center gap-1.5 rounded-full border border-primary/10 bg-white/70 px-6 text-[16px] font-bold text-primary transition-all duration-150 hover:bg-white active:scale-[0.97]"
           >
             Sign in
           </Link>
           <Link
             href="/sign-up"
-            className="flex h-9 items-center gap-1.5 rounded-full bg-primary px-4 text-xs font-bold text-white transition-all duration-150 hover:bg-primary/95 active:scale-[0.97] shadow-lg shadow-primary/20"
+            className="flex h-12 items-center gap-1.5 rounded-full bg-primary px-6 text-[16px] font-bold text-white transition-all duration-150 hover:bg-primary/95 active:scale-[0.97] shadow-lg shadow-primary/20"
           >
             Sign up
           </Link>

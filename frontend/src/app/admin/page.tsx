@@ -74,19 +74,8 @@ export default function AdminDashboard() {
     };
   }, [router, refresh]);
 
-  // Periodic background polling for admin dashboard (every 5 seconds)
-  useEffect(() => {
-    if (!authChecked) return;
-    const interval = setInterval(async () => {
-      try {
-        await refresh();
-      } catch (err) {
-        console.warn("[AdminDashboard] Background auto-refresh failed:", err);
-      }
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [authChecked, refresh]);
+  // No background polling on the admin dashboard — admin data is low-churn, so
+  // it loads once on mount and refreshes on user actions (which call refresh()).
 
   if (!authChecked) {
     return (

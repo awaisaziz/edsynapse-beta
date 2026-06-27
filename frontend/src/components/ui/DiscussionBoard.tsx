@@ -121,42 +121,6 @@ export function DiscussionBoard({ courseId }: { courseId: string }) {
     loadThreads();
   }, [loadThreads]);
 
-  // Periodic background polling for Discussion board (every 3 seconds)
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        // Fetch discussions list in background
-        const { threads: updatedThreads, role: courseRole } = await discussionApi.list(courseId);
-        
-        // Update role
-        setRole(courseRole);
-        
-        // Update threads list only if changed (prevents unnecessary re-renders)
-        setThreads((prev) => {
-          const changed = prev.length !== updatedThreads.length || 
-            updatedThreads.some((t, i) => !prev[i] || t.updatedAt !== prev[i].updatedAt || t.replyCount !== prev[i].replyCount);
-          return changed ? updatedThreads : prev;
-        });
-
-        // If a thread is active, and we are not composing or editing, refresh its details
-        if (activeId && !composing && !editingThread && !editingPostId && !composingAnswer) {
-          const { thread } = await discussionApi.get(courseId, activeId);
-          setDetail((prevDetail) => {
-            if (!prevDetail) return thread;
-            const changed = prevDetail.updatedAt !== thread.updatedAt || 
-              prevDetail.posts.length !== thread.posts.length ||
-              thread.posts.some((p, i) => !prevDetail.posts[i] || p.body !== prevDetail.posts[i].body || p.createdAt !== prevDetail.posts[i].createdAt);
-            return changed ? thread : prevDetail;
-          });
-        }
-      } catch (err) {
-        console.error("[DiscussionBoard] Auto-refresh failed:", err);
-      }
-    }, 3000);
-
-    return () => clearInterval(interval);
-  }, [courseId, activeId, composing, editingThread, editingPostId, composingAnswer]);
-
   // Load students for teachers when composing private threads
   useEffect(() => {
     if (composing && visibility === "private" && role === "owner" && students.length === 0) {

@@ -356,10 +356,12 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
     return () => { cancelled = true; };
   }, [id]);
 
-  // Periodic background polling for teacher course view (every 5 seconds)
+  // Periodic background polling for teacher course view. Paused while the tab
+  // is hidden to avoid needless invocations on the Vercel free tier.
   useEffect(() => {
     if (notFound) return;
     const interval = setInterval(async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
       try {
         if (!busyLesson && !removeStudentBusy && !recordLoading && !reviewLoading) {
           // 1. Reload course
@@ -385,7 +387,7 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
           setNotFound(true);
         }
       }
-    }, 5000);
+    }, 60000);
 
     return () => clearInterval(interval);
   }, [id, activeTab, busyLesson, removeStudentBusy, recordLoading, reviewLoading, notFound]);

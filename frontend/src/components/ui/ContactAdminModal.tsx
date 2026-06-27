@@ -31,11 +31,13 @@ export function ContactAdminModal({ open, onClose }: ContactAdminModalProps) {
   const [sending, setSending] = useState(false);
   const scrollRef = useRef<HTMLDivElement>(null);
 
+  // Load the support thread once when the modal opens. No polling — replies
+  // appear next time the modal is opened (avoids needless free-tier requests).
   useEffect(() => {
     if (!open) return;
     setSent(false);
 
-    const fetchSupport = async () => {
+    (async () => {
       try {
         const res = await fetch("/api/support", { credentials: "include" });
         if (!res.ok) return;
@@ -44,14 +46,7 @@ export function ContactAdminModal({ open, onClose }: ContactAdminModalProps) {
       } catch {
         /* leave thread as-is */
       }
-    };
-
-    fetchSupport();
-    const interval = setInterval(fetchSupport, 4000);
-
-    return () => {
-      clearInterval(interval);
-    };
+    })();
   }, [open]);
 
   useEffect(() => {

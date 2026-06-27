@@ -1716,10 +1716,12 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
     return () => { cancelled = true; };
   }, [courseId]);
 
-  // Periodic background polling for classroom view (every 5 seconds)
+  // Periodic background polling for classroom view. Paused while the tab is
+  // hidden to avoid needless invocations on the Vercel free tier.
   useEffect(() => {
     if (!courseId) return;
     const interval = setInterval(async () => {
+      if (typeof document !== "undefined" && document.hidden) return;
       try {
         if (!diagnosticOpen && !generating && !notesLoading && !flashcardsLoading) {
           // 1. Reload course
@@ -1744,7 +1746,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
           setCourseData(null);
         }
       }
-    }, 5000);
+    }, 60000);
 
     return () => clearInterval(interval);
   }, [courseId, code, diagnosticOpen, generating, notesLoading, flashcardsLoading]);

@@ -155,23 +155,7 @@ export default function TeacherDashboard() {
     load();
   }, [load]);
 
-  // Periodic background polling for teacher courses (every 5 seconds)
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const { courses: updatedCourses } = await teacherApi.listCourses();
-        setCourses((prev) => {
-          const changed = prev.length !== updatedCourses.length ||
-            updatedCourses.some((c, i) => !prev[i] || c.archived !== prev[i].archived || c.color !== prev[i].color || c.name !== prev[i].name || c.lessons.length !== prev[i].lessons.length || c.studentCount !== prev[i].studentCount);
-          return changed ? updatedCourses : prev;
-        });
-      } catch (err) {
-        console.warn("[TeacherDashboard] Background auto-refresh failed:", err);
-      }
-    }, 5000);
 
-    return () => clearInterval(interval);
-  }, []);
 
   const [busyId, setBusyId] = useState<string | null>(null);
 

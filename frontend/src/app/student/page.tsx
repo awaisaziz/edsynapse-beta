@@ -46,24 +46,7 @@ export default function StudentDashboard() {
     load();
   }, [load]);
 
-  // Periodic background polling for student courses (every 5 seconds)
-  useEffect(() => {
-    const interval = setInterval(async () => {
-      try {
-        const { courses: updatedCourses } = await studentApi.listCourses();
-        setCourses((prev) => {
-          // Compare to prevent unnecessary state updates
-          const changed = prev.length !== updatedCourses.length ||
-            updatedCourses.some((c, i) => !prev[i] || c.archived !== prev[i].archived || c.color !== prev[i].color || c.name !== prev[i].name || c.lessons.length !== prev[i].lessons.length);
-          return changed ? updatedCourses : prev;
-        });
-      } catch (err) {
-        console.warn("[StudentDashboard] Background auto-refresh failed:", err);
-      }
-    }, 5000);
 
-    return () => clearInterval(interval);
-  }, []);
 
   // Optimistically patch one course in local state, fall back to a reload on error.
   const patchCourse = useCallback(

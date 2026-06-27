@@ -44,6 +44,8 @@ import {
   AlertTriangle,
   Play,
   RefreshCw,
+  History,
+  Menu,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import Markdown from "@/components/ui/Markdown";
@@ -361,6 +363,7 @@ function ConversationPanel({
   const [threads, setThreads] = useState<ConvThread[]>([]);
   const [threadsLoading, setThreadsLoading] = useState(true);
   const [activeTopic, setActiveTopic] = useState<string | null>(null);
+  const [showHistoryMobile, setShowHistoryMobile] = useState(false);
   const [messages, setMessages] = useState<ChatMsg[]>([{ role: "ai", text: welcome }]);
   const [input, setInput] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -413,7 +416,7 @@ function ConversationPanel({
           studentApi
             .getTutorHistory(courseId, first)
             .then(({ messages }) => {
-              if (!cancelled) setMessages(messages.length ? messages.map(mapStored) : [{ role: "ai", text: welcome }]);
+              if (!cancelled) setMessages([{ role: "ai", text: welcome }, ...messages.map(mapStored)]);
             })
             .catch((err) => {
               console.error("[ConversationPanel] Initial history load failed:", err);
@@ -442,6 +445,7 @@ function ConversationPanel({
 
   const selectThread = useCallback(
     async (topic: string, force = false) => {
+      setShowHistoryMobile(false);
       if (!force && topic === activeTopic && messages.length > 1) return;
       if (!courseId) return;
       abortRef.current?.abort();
@@ -449,13 +453,10 @@ function ConversationPanel({
       setMessages([{ role: "ai", text: welcome }]);
       try {
         const { messages: historyMsgs } = await studentApi.getTutorHistory(courseId, topic);
-        if (historyMsgs.length) {
-          setMessages(historyMsgs.map(mapStored));
-        } else {
-          setMessages([{ role: "ai", text: welcome }]);
-        }
+        setMessages([{ role: "ai", text: welcome }, ...historyMsgs.map(mapStored)]);
       } catch (err) {
         console.error("[ConversationPanel] Failed to load tutor history:", err);
+        setMessages([{ role: "ai", text: welcome }]);
       }
     },
     [activeTopic, messages.length, courseId, welcome],
@@ -593,174 +594,184 @@ function ConversationPanel({
   // The "welcome" hero shows only before the learner has said anything.
   const isWelcome = messages.length === 1 && messages[0]?.role === "ai" && !generating;
 
+  const renderSidebarContent = () => (
+    <>
+      {/* Drag handle on the right edge (only visible on desktop) */}
+      <div
+        onMouseDown={rail.onMouseDown}
+        title="Drag to resize"
+        className="absolute top-0 right-0 z-10 h-full w-1.5 cursor-col-resize transition-colors hover:bg-primary/25 active:bg-primary/40 hidden md:block"
+      />
+      <div className="p-3 border-b border-white/50">
+        <button
+          onClick={newThread}
+          className="flex w-full items-center justify-center gap-1.5 rounded-2xl px-3 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:opacity-95 active:scale-[0.98]"
+          style={{ backgroundColor: accent }}
+        >
+          <Plus className="w-4 h-4" />
+          {newLabel}
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto chat-scroll p-2 space-y-1">
+        {threadsLoading ? (
+          <div className="py-8 flex justify-center">
+            <div className="w-6 h-6 animate-spin rounded-full border-2 border-primary/20 border-t-primary" />
+          </div>
+        ) : threads.length === 0 ? (
+          <p className="px-2 py-6 text-center text-[11px] text-muted-foreground">
+            No saved {surface === "tutor" ? "tutor chats" : surface === "socratic" ? "Socratic chats" : surface === "chat" ? "chats" : "discussions"} yet. Start one above.
+          </p>
+        ) : (
+          threads.map((t) => {
+            const active = t.topic === activeTopic;
+            return (
+              <div
+                key={t.topic}
+                role="button"
+                tabIndex={0}
+                onClick={() => selectThread(t.topic)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") {
+                    e.preventDefault();
+                    selectThread(t.topic);
+                  }
+                }}
+                className={cn(
+                  "group flex items-center gap-1 rounded-xl px-2.5 py-2 transition-all cursor-pointer border outline-none focus-visible:ring-2 focus-visible:ring-primary",
+                  active
+                    ? "bg-white shadow-sm border-primary/30 ring-1 ring-primary/15"
+                    : "border-transparent hover:bg-white hover:border-primary/20 hover:shadow-sm",
+                )}
+              >
+                {editingTopic === t.topic ? (
+                  <input
+                    autoFocus
+                    value={editDraft}
+                    onChange={(e) => setEditDraft(e.target.value)}
+                    onKeyDown={(e) => {
+                      e.stopPropagation();
+                      if (e.key === "Enter") saveRename(t.topic);
+                      if (e.key === "Escape") setEditingTopic(null);
+                    }}
+                    onClick={(e) => e.stopPropagation()}
+                    onBlur={() => saveRename(t.topic)}
+                    className="flex-1 min-w-0 rounded-lg border border-primary/20 bg-white px-2 py-1 text-xs font-semibold text-foreground outline-none"
+                  />
+                ) : (
+                  <div className="flex-1 min-w-0 text-left">
+                    <p className={cn("truncate text-xs font-bold", active ? "text-foreground" : "text-foreground/80")}>
+                      {t.title}
+                    </p>
+                    {t.preview && <p className="truncate text-[10px] text-muted-foreground">{t.preview}</p>}
+                  </div>
+                )}
+                {editingTopic === t.topic ? (
+                  <button
+                    onMouseDown={(e) => e.preventDefault()}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      saveRename(t.topic);
+                    }}
+                    title="Save name"
+                    className="shrink-0 rounded-lg p-1 text-emerald-600 hover:bg-emerald-500/10"
+                  >
+                    <Check className="w-3.5 h-3.5" />
+                  </button>
+                ) : (
+                  <div
+                    className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setEditingTopic(t.topic);
+                        setEditDraft(t.title);
+                      }}
+                      title="Rename"
+                      className="rounded-lg p-1 text-muted-foreground hover:bg-white hover:text-foreground"
+                    >
+                      <Pencil className="w-3 h-3" />
+                    </button>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setDeleteTarget(t);
+                      }}
+                      title="Delete"
+                      className="rounded-lg p-1 text-muted-foreground hover:bg-red-500/10 hover:text-red-600"
+                    >
+                      <Trash2 className="w-3 h-3" />
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </div>
+    </>
+  );
+
   return (
     <div className="flex flex-1 min-w-0 min-h-0">
-      {/* ── Thread rail (drag-resizable) ────────────────────── */}
+      {/* ── Thread rail mobile drawer overlay ──────────────── */}
+      {showHistoryMobile && (
+        <div className="fixed inset-0 z-50 md:hidden flex">
+          <div className="fixed inset-0 bg-black/35 backdrop-blur-sm" onClick={() => setShowHistoryMobile(false)} />
+          <aside
+            style={{ width: 260 }}
+            className="relative z-50 flex flex-col bg-[#f8fafc] border-r border-slate-200 h-full max-w-[80vw]"
+          >
+            {renderSidebarContent()}
+          </aside>
+        </div>
+      )}
+
+      {/* ── Thread rail (drag-resizable, desktop only) ───────── */}
       <aside
         style={{ width: rail.width }}
         className="relative hidden md:flex shrink-0 flex-col border-r border-white/50 bg-white/35 backdrop-blur-md"
       >
-        {/* Drag handle on the right edge */}
-        <div
-          onMouseDown={rail.onMouseDown}
-          title="Drag to resize"
-          className="absolute top-0 right-0 z-10 h-full w-1.5 cursor-col-resize transition-colors hover:bg-primary/25 active:bg-primary/40"
-        />
-        <div className="p-3 border-b border-white/50">
-          <button
-            onClick={newThread}
-            className="flex w-full items-center justify-center gap-1.5 rounded-2xl px-3 py-2.5 text-xs font-bold text-white shadow-md transition-all hover:opacity-95 active:scale-[0.98]"
-            style={{ backgroundColor: accent }}
-          >
-            <Plus className="w-4 h-4" />
-            {newLabel}
-          </button>
-        </div>
-        <div className="flex-1 overflow-y-auto chat-scroll p-2 space-y-1">
-          {threadsLoading ? (
-            <div className="py-8 flex justify-center">
-              <div className="w-6 h-6 animate-spin rounded-full border-2 border-primary/20 border-t-primary" />
-            </div>
-          ) : threads.length === 0 ? (
-            <p className="px-2 py-6 text-center text-[11px] text-muted-foreground">
-              No saved {surface === "tutor" ? "tutor chats" : surface === "socratic" ? "Socratic chats" : surface === "chat" ? "chats" : "discussions"} yet. Start one above.
-            </p>
-          ) : (
-            threads.map((t) => {
-              const active = t.topic === activeTopic;
-              return (
-                <div
-                  key={t.topic}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() => selectThread(t.topic)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter" || e.key === " ") {
-                      e.preventDefault();
-                      selectThread(t.topic);
-                    }
-                  }}
-                  className={cn(
-                    "group flex items-center gap-1 rounded-xl px-2.5 py-2 transition-all cursor-pointer border outline-none focus-visible:ring-2 focus-visible:ring-primary",
-                    active
-                      ? "bg-white shadow-sm border-primary/30 ring-1 ring-primary/15"
-                      : "border-transparent hover:bg-white hover:border-primary/20 hover:shadow-sm",
-                  )}
-                >
-                  {editingTopic === t.topic ? (
-                    <input
-                      autoFocus
-                      value={editDraft}
-                      onChange={(e) => setEditDraft(e.target.value)}
-                      onKeyDown={(e) => {
-                        e.stopPropagation();
-                        if (e.key === "Enter") saveRename(t.topic);
-                        if (e.key === "Escape") setEditingTopic(null);
-                      }}
-                      onClick={(e) => e.stopPropagation()}
-                      onBlur={() => saveRename(t.topic)}
-                      className="flex-1 min-w-0 rounded-lg border border-primary/20 bg-white px-2 py-1 text-xs font-semibold text-foreground outline-none"
-                    />
-                  ) : (
-                    <div className="flex-1 min-w-0 text-left">
-                      <p className={cn("truncate text-xs font-bold", active ? "text-foreground" : "text-foreground/80")}>
-                        {t.title}
-                      </p>
-                      {t.preview && <p className="truncate text-[10px] text-muted-foreground">{t.preview}</p>}
-                    </div>
-                  )}
-                  {editingTopic === t.topic ? (
-                    <button
-                      onMouseDown={(e) => e.preventDefault()}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        saveRename(t.topic);
-                      }}
-                      title="Save name"
-                      className="shrink-0 rounded-lg p-1 text-emerald-600 hover:bg-emerald-500/10"
-                    >
-                      <Check className="w-3.5 h-3.5" />
-                    </button>
-                  ) : (
-                    <div
-                      className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity group-hover:opacity-100"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setEditingTopic(t.topic);
-                          setEditDraft(t.title);
-                        }}
-                        title="Rename"
-                        className="rounded-lg p-1 text-muted-foreground hover:bg-white hover:text-foreground"
-                      >
-                        <Pencil className="w-3 h-3" />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setDeleteTarget(t);
-                        }}
-                        title="Delete"
-                        className="rounded-lg p-1 text-muted-foreground hover:bg-red-500/10 hover:text-red-600"
-                      >
-                        <Trash2 className="w-3 h-3" />
-                      </button>
-                    </div>
-                  )}
-                </div>
-              );
-            })
-          )}
-        </div>
+        {renderSidebarContent()}
       </aside>
 
       {/* ── Conversation ────────────────────────────────────── */}
       <div className="flex flex-1 flex-col min-w-0 min-h-0">
-      <div className="flex items-center justify-between border-b border-white/40 bg-white/40 backdrop-blur-md px-6 py-3 shrink-0">
-        <div className="flex items-center gap-2.5">
-          <div
-            className="flex w-8 h-8 items-center justify-center rounded-xl text-white shadow-sm"
-            style={{ backgroundColor: accent }}
-          >
-            <MessageCircle className="w-4 h-4" />
-          </div>
-          <div>
-            <p className="text-sm font-bold text-foreground font-display leading-tight">{title}</p>
-            <p className="text-[11px] text-muted-foreground">{subtitle}</p>
-          </div>
-        </div>
-      </div>
-
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6 chat-scroll">
-        <div className="mx-auto w-full max-w-none">
-          {isWelcome ? (
-            /* Minimal starter — just suggested topics; no logo/title/welcome copy
-               (the panel header already shows the title + subtitle). */
-            <div className="flex flex-col items-center pt-6 edsynapse-stagger">
-              {suggestions.length > 0 && (
-                <div className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2">
-                  {suggestions.map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => send(s)}
-                      className="group flex items-center gap-3 rounded-2xl border border-white/70 bg-white/50 p-3.5 text-left backdrop-blur-sm shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/25 hover:bg-white hover:shadow-md active:scale-[0.98]"
-                    >
-                      <div
-                        className="flex w-7 h-7 shrink-0 items-center justify-center rounded-lg text-white"
-                        style={{ backgroundColor: accent }}
-                      >
-                        <Sparkles className="w-3.5 h-3.5" />
-                      </div>
-                      <span className="flex-1 text-xs font-semibold text-foreground">{s}</span>
-                      <ArrowRight className="w-3.5 h-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
-                    </button>
-                  ))}
-                </div>
-              )}
+        <div className="flex items-center justify-between border-b border-white/40 bg-white/40 backdrop-blur-md px-6 py-3 shrink-0">
+          <div className="flex items-center gap-2.5">
+            {/* Mobile history toggle button */}
+            <button
+              onClick={() => setShowHistoryMobile(true)}
+              title="Show history"
+              className="md:hidden flex w-8 h-8 items-center justify-center rounded-xl border border-primary/10 bg-white shadow-sm text-muted-foreground hover:text-foreground active:scale-[0.95] transition-all"
+            >
+              <History className="w-4 h-4" />
+            </button>
+            <div
+              className="flex w-8 h-8 items-center justify-center rounded-xl text-white shadow-sm"
+              style={{ backgroundColor: accent }}
+            >
+              <MessageCircle className="w-4 h-4" />
             </div>
-          ) : (
+            <div>
+              <p className="text-sm font-bold text-foreground font-display leading-tight">{title}</p>
+              <p className="text-[11px] text-muted-foreground">{subtitle}</p>
+            </div>
+          </div>
+          {/* Mobile quick new chat button */}
+          <button
+            onClick={newThread}
+            title={newLabel}
+            className="md:hidden flex items-center justify-center gap-1 px-2.5 py-1.5 rounded-xl border border-primary/15 bg-white text-[11px] font-bold text-foreground shadow-sm hover:bg-slate-50 transition-all active:scale-[0.97]"
+          >
+            <Plus className="w-3.5 h-3.5" style={{ color: accent }} />
+            <span>New Chat</span>
+          </button>
+        </div>
+
+        <div ref={scrollRef} className="flex-1 overflow-y-auto px-6 py-6 chat-scroll">
+          <div className="mx-auto w-full max-w-none">
             <div className="space-y-5">
               {messages.map((m, i) => (
                 <div key={i} className={cn("group flex gap-3", m.role === "user" && "justify-end")}>
@@ -778,7 +789,7 @@ function ConversationPanel({
                           : "bg-primary text-white whitespace-pre-wrap",
                       )}
                     >
-                      {m.role === "ai" ? <Markdown>{m.text}</Markdown> : m.text}
+                      {m.role === "ai" ? <Markdown size="sm">{m.text}</Markdown> : m.text}
                     </div>
                     {m.text && (
                       <CopyButton text={m.text} className="opacity-0 transition-opacity group-hover:opacity-100" />
@@ -786,6 +797,32 @@ function ConversationPanel({
                   </div>
                 </div>
               ))}
+
+              {isWelcome && suggestions.length > 0 && (
+                <div className="flex flex-col items-start pt-4 edsynapse-stagger w-full pl-10">
+                  <p className="w-full text-left text-[10px] font-bold text-muted-foreground mb-3 uppercase tracking-wider">
+                    Suggested topics to start
+                  </p>
+                  <div className="grid w-full grid-cols-1 gap-2.5 sm:grid-cols-2">
+                    {suggestions.map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => send(s)}
+                        className="group flex items-center gap-3 rounded-2xl border border-white/70 bg-white/50 p-3.5 text-left backdrop-blur-sm shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/25 hover:bg-white hover:shadow-md active:scale-[0.98]"
+                      >
+                        <div
+                          className="flex w-7 h-7 shrink-0 items-center justify-center rounded-lg text-white"
+                          style={{ backgroundColor: accent }}
+                        >
+                          <Sparkles className="w-3.5 h-3.5" />
+                        </div>
+                        <span className="flex-1 text-xs font-semibold text-foreground">{s}</span>
+                        <ArrowRight className="w-3.5 h-3.5 text-muted-foreground opacity-0 transition-opacity group-hover:opacity-100" />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
               {generating && messages[messages.length - 1]?.role === "user" && (
                 <div className="flex gap-3">
@@ -800,48 +837,47 @@ function ConversationPanel({
                 </div>
               )}
             </div>
-          )}
+          </div>
         </div>
-      </div>
 
-      <div className="shrink-0 px-4 pb-4 pt-2">
-        <div className="mx-auto w-full max-w-none">
-          <div className="flex items-end gap-2 rounded-2xl border border-primary/15 bg-white p-2 shadow-lg shadow-primary/10">
-            <textarea
-              ref={taRef}
-              value={input}
-              rows={1}
-              onChange={(e) => {
-                setInput(e.target.value);
-                autosize();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && !e.shiftKey) {
-                  e.preventDefault();
+        <div className="shrink-0 px-4 pb-4 pt-2">
+          <div className="mx-auto w-full max-w-none">
+            <div className="flex items-end gap-2 rounded-2xl border border-primary/15 bg-white p-2 shadow-lg shadow-primary/10">
+              <textarea
+                ref={taRef}
+                value={input}
+                rows={1}
+                onChange={(e) => {
+                  setInput(e.target.value);
+                  autosize();
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && !e.shiftKey) {
+                    e.preventDefault();
+                    send();
+                    requestAnimationFrame(autosize);
+                  }
+                }}
+                placeholder={emptyHint}
+                className="chat-scroll flex-1 resize-none bg-transparent px-2 py-1.5 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground font-sans"
+              />
+              <button
+                onClick={() => {
                   send();
                   requestAnimationFrame(autosize);
-                }
-              }}
-              placeholder={emptyHint}
-              className="chat-scroll flex-1 resize-none bg-transparent px-2 py-1.5 text-sm leading-relaxed text-foreground outline-none placeholder:text-muted-foreground font-sans"
-            />
-            <button
-              onClick={() => {
-                send();
-                requestAnimationFrame(autosize);
-              }}
-              disabled={!input.trim() || generating}
-              className="flex w-9 h-9 shrink-0 items-center justify-center rounded-xl text-white hover:opacity-95 disabled:opacity-40 transition-all"
-              style={{ backgroundColor: accent }}
-            >
-              <Send className="w-4 h-4" />
-            </button>
+                }}
+                disabled={!input.trim() || generating}
+                className="flex w-9 h-9 shrink-0 items-center justify-center rounded-xl text-white hover:opacity-95 disabled:opacity-40 transition-all"
+                style={{ backgroundColor: accent }}
+              >
+                <Send className="w-4 h-4" />
+              </button>
+            </div>
+            <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
+              <span className="font-semibold">Enter</span> to send · <span className="font-semibold">Shift + Enter</span> for a new line
+            </p>
           </div>
-          <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
-            <span className="font-semibold">Enter</span> to send · <span className="font-semibold">Shift + Enter</span> for a new line
-          </p>
         </div>
-      </div>
       </div>
 
       {/* Delete confirmation */}
@@ -2176,13 +2212,13 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
     allTopics.slice(0, 4).map((t) => `Explain ${t}`) ||
     [];
 
-  const NAV_TABS: { id: ClassView; label: string; icon: any }[] = [
+  const NAV_TABS = [
     { id: "course", label: "Course", icon: FolderOpen },
     { id: "learning", label: "Learning", icon: GraduationCap },
     { id: "tutor", label: "AI Tutor", icon: MessageCircle },
     { id: "socratic", label: "Socratic AI", icon: Sparkles },
-    { id: "board", label: "Q&A Board", icon: HelpCircle },
-  ];
+    ...(!isSelfStudy ? [{ id: "board", label: "Q&A Board", icon: HelpCircle }] : []),
+  ] as { id: ClassView; label: string; icon: any }[];
 
   return (
     <div className="flex flex-col h-screen overflow-hidden bg-[#f0f6ff] text-[#1d1d1f] font-sans">
@@ -2294,7 +2330,7 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
             )
           }
         />
-      ) : view === "board" ? (
+      ) : view === "board" && !isSelfStudy ? (
         <div className="flex-1 flex flex-col min-h-0 p-6 overflow-hidden">
           <DiscussionBoard courseId={courseId!} />
         </div>

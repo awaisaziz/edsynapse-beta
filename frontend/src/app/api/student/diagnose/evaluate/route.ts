@@ -10,6 +10,8 @@ export const dynamic = "force-dynamic"
 interface IncomingQuestion {
   id: string
   topic: string
+  prompt: string
+  choices: { label: string; text: string }[]
   correct_label: string
   rationale: string
 }

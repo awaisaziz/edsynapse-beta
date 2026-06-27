@@ -29,7 +29,7 @@ export interface AttemptRow {
   total: number
   created_at: string
   questions: StoredQuestion[]
-  answers: { question_id: string; response: string }[]
+  answers: { question_id: string; response?: string; selected_label?: string }[]
   report: StoredReportItem[]
 }
 
@@ -57,13 +57,13 @@ export interface AttemptReview {
 }
 
 export function serializeAttemptReview(row: AttemptRow): AttemptReview {
-  const answerMap = new Map((row.answers ?? []).map((a) => [a.question_id, a.response ?? ""]))
+  const answerMap = new Map((row.answers ?? []).map((a) => [a.question_id, a.response ?? a.selected_label ?? ""]))
   const reportMap = new Map((row.report ?? []).map((r) => [r.question_id, r]))
 
   const review: ReviewItem[] = (row.questions ?? []).map((q) => {
     const response = answerMap.get(q.id) ?? ""
     const rep = reportMap.get(q.id)
-    if (q.type === "mcq" && q.choices) {
+    if ((q.type === "mcq" || (!q.type && q.choices)) && q.choices) {
       const options = q.choices.map((c) => `${c.label}. ${c.text}`)
       const selectedIndex = q.choices.findIndex((c) => c.label === response)
       const correctIndex = q.choices.findIndex((c) => c.label === q.correct_label)

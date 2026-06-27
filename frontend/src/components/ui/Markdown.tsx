@@ -116,23 +116,38 @@ const KATEX_OPTIONS = { throwOnError: false, strict: false as const, errorColor:
  * Renders LLM output as GitHub-flavored Markdown with LaTeX math
  * (`$inline$` / `$$block$$`) via KaTeX, plus styled citation pills.
  */
-export default function Markdown({ children, className }: { children: string; className?: string }) {
+export default function Markdown({
+  children,
+  className,
+  size = "xs",
+}: {
+  children: string;
+  className?: string;
+  size?: "xs" | "sm" | "base";
+}) {
+  const sizeClasses = {
+    xs: "text-xs [&_h1]:text-base [&_h2]:text-sm [&_h3]:text-xs [&_code]:text-[11px] [&_pre]:text-[11px] [&_table]:text-[11px]",
+    sm: "text-sm [&_h1]:text-lg [&_h2]:text-base [&_h3]:text-sm [&_code]:text-xs [&_pre]:text-xs [&_table]:text-xs",
+    base: "text-base [&_h1]:text-xl [&_h2]:text-lg [&_h3]:text-base [&_code]:text-sm [&_pre]:text-sm [&_table]:text-sm",
+  }[size];
+
   return (
     <div
       className={cn(
-        "edsynapse-md text-xs leading-relaxed text-foreground/90 font-sans",
+        "edsynapse-md leading-relaxed text-foreground/90 font-sans",
+        sizeClasses,
         "[&_p]:my-2 [&_p:first-child]:mt-0 [&_p:last-child]:mb-0",
         "[&_ul]:my-2 [&_ul]:ml-4 [&_ul]:list-disc [&_ol]:my-2 [&_ol]:ml-4 [&_ol]:list-decimal [&_li]:my-0.5",
-        "[&_h1]:text-base [&_h1]:font-bold [&_h1]:font-display [&_h1]:mt-4 [&_h1]:mb-1.5",
-        "[&_h2]:text-sm [&_h2]:font-bold [&_h2]:font-display [&_h2]:mt-3 [&_h2]:mb-1",
-        "[&_h3]:text-xs [&_h3]:font-bold [&_h3]:mt-3 [&_h3]:mb-1",
+        "[&_h1]:font-bold [&_h1]:font-display [&_h1]:mt-4 [&_h1]:mb-1.5",
+        "[&_h2]:font-bold [&_h2]:font-display [&_h2]:mt-3 [&_h2]:mb-1",
+        "[&_h3]:font-bold [&_h3]:mt-3 [&_h3]:mb-1",
         "[&_strong]:font-bold [&_strong]:text-foreground [&_em]:italic",
         "[&_a]:text-primary [&_a]:font-semibold [&_a]:underline [&_a]:underline-offset-2",
-        "[&_code]:rounded [&_code]:bg-black/5 [&_code]:px-1 [&_code]:py-0.5 [&_code]:text-[11px] [&_code]:font-mono",
-        "[&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-[#0f172a] [&_pre]:p-3 [&_pre]:text-[11px]",
+        "[&_code]:rounded [&_code]:bg-black/5 [&_code]:px-1 [&_code]:py-0.5 [&_code]:font-mono",
+        "[&_pre]:my-2 [&_pre]:overflow-x-auto [&_pre]:rounded-xl [&_pre]:bg-[#0f172a] [&_pre]:p-3",
         "[&_pre_code]:bg-transparent [&_pre_code]:px-0 [&_pre_code]:text-slate-100",
         "[&_blockquote]:border-l-2 [&_blockquote]:border-primary/30 [&_blockquote]:pl-3 [&_blockquote]:italic [&_blockquote]:text-foreground/70",
-        "[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse [&_table]:text-[11px]",
+        "[&_table]:my-2 [&_table]:w-full [&_table]:border-collapse",
         "[&_th]:border [&_th]:border-black/10 [&_th]:bg-black/5 [&_th]:px-2 [&_th]:py-1 [&_th]:font-bold [&_th]:text-left",
         "[&_td]:border [&_td]:border-black/10 [&_td]:px-2 [&_td]:py-1",
         "[&_.katex-display]:my-3 [&_.katex-display]:overflow-x-auto [&_.katex-display]:overflow-y-hidden",

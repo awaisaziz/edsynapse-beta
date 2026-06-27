@@ -2411,6 +2411,21 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
               <span>Diagnostic Test</span>
               <ChevronRight className="ml-auto w-3.5 h-3.5" />
             </button>
+            {/* Always available (not gated behind opening a lesson), so a student
+                can take the course assessment from anywhere on this page. */}
+            <Link
+              href={`/student/class/${code}/assessment`}
+              aria-disabled={!courseId}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-2xl border px-3 py-2.5 text-left text-xs font-bold transition-all duration-150 active:scale-[0.98]",
+                "border-emerald-100 bg-emerald-500/5 text-emerald-700 hover:bg-emerald-500/10",
+                !courseId && "pointer-events-none opacity-40",
+              )}
+            >
+              <Trophy className="w-4 h-4 shrink-0 text-emerald-600" />
+              <span>Take Assessment</span>
+              <ChevronRight className="ml-auto w-3.5 h-3.5" />
+            </Link>
           </div>
         )}
 
@@ -2478,18 +2493,6 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
                     </button>
                   ))}
                 </nav>
-              </div>
-
-              <div className="border-t border-white/40 pt-4">
-                <p className="mb-2 px-2 text-[10px] font-bold uppercase tracking-wider text-muted-foreground">Assessment</p>
-                <Link
-                  href={`/student/class/${code}/assessment`}
-                  className="flex w-full items-center gap-3 rounded-2xl border border-emerald-100 bg-emerald-500/5 px-3 py-2.5 text-left text-xs font-bold text-emerald-700 cursor-pointer transition-all duration-150 hover:scale-[1.02] hover:shadow-md hover:bg-emerald-500/10 active:scale-[0.98]"
-                >
-                  <Trophy className="w-4 h-4 shrink-0 text-emerald-600" />
-                  <span>Take Assessment</span>
-                  <ChevronRight className="ml-auto w-3.5 h-3.5" />
-                </Link>
               </div>
             </div>
           )}

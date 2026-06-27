@@ -421,7 +421,16 @@ function CoursesTab({
   courses: AdminCourse[];
   onChange: () => void | Promise<void>;
 }) {
+  const [search, setSearch] = useState("");
   const [confirmDelete, setConfirmDelete] = useState<AdminCourse | null>(null);
+
+  const filtered = courses.filter(
+    (c) =>
+      c.name.toLowerCase().includes(search.toLowerCase()) ||
+      c.subject.toLowerCase().includes(search.toLowerCase()) ||
+      c.code.toLowerCase().includes(search.toLowerCase()) ||
+      c.ownerName.toLowerCase().includes(search.toLowerCase())
+  );
 
   const handleDelete = async (id: string) => {
     await fetch(`/api/admin/courses/${id}`, { method: "DELETE", credentials: "include" });
@@ -431,6 +440,18 @@ function CoursesTab({
 
   return (
     <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 w-4 h-4 -translate-y-1/2 text-muted-foreground" />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search courses..."
+            className="h-11 w-64 rounded-2xl border border-primary/15 bg-white/70 pl-9 pr-4 text-xs outline-none focus:border-primary focus:bg-white"
+          />
+        </div>
+      </div>
+
       <div className="overflow-hidden rounded-3xl border border-white/70 bg-white/45 shadow-lg backdrop-blur-xl">
         <div className="grid grid-cols-[1fr_auto_auto] items-center gap-4 border-b border-white/40 px-5 py-3 text-[10px] font-extrabold uppercase tracking-wider text-muted-foreground">
           <span>Course</span>
@@ -438,10 +459,10 @@ function CoursesTab({
           <span className="w-16 text-right">Action</span>
         </div>
 
-        {courses.length === 0 ? (
-          <p className="px-5 py-8 text-center text-xs text-muted-foreground">No courses yet.</p>
+        {filtered.length === 0 ? (
+          <p className="px-5 py-8 text-center text-xs text-muted-foreground">No courses found.</p>
         ) : (
-          courses.map((course) => (
+          filtered.map((course) => (
             <div
               key={course.id}
               className="grid grid-cols-[1fr_auto_auto] items-center gap-4 border-b border-white/30 px-5 py-3.5 last:border-0"

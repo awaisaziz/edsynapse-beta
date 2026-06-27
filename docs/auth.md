@@ -29,6 +29,84 @@ email/password on Aurora); the only outsourced piece is email *delivery*.
 **Identity is always derived server-side from the session cookie.** The client
 never stores credentials, role, or tokens in `localStorage`/`sessionStorage`.
 
+### Request authentication & privacy flow
+
+Every protected request crosses a **two-layer gate**: a cheap cookie-presence
+redirect at the edge, then the *real* authority — a server-side session + role
+lookup in Aurora. Nothing trusts client-supplied identity. The annotations call
+out where each privacy control sits.
+
+```mermaid
+flowchart TB
+    B["Browser — sends httpOnly cookie<br/>edsynapse_session only<br/>(no role/token in JS storage)"]
+
+    subgraph edge["Vercel Edge — middleware.ts (no DB)"]
+        MW{"edsynapse_session<br/>cookie present?"}
+    end
+
+    subgraph srv["Vercel Serverless — route handler (Node.js)"]
+        RU["requireUser(role?)"]
+        Q[("Aurora — sessions ⋈ users<br/>token lookup + expiry + status")]
+        ROLE{"session valid<br/>& role allowed?"}
+        OK["Handler runs<br/>scoped to this user_id"]
+    end
+
+    B -->|"request to /student·/teacher·/admin"| MW
+    MW -->|"no cookie"| R1["302 → /sign-in"]
+    MW -->|"cookie present"| RU
+    RU --> Q
+    Q --> ROLE
+    ROLE -->|"no / wrong role"| R2["AuthError → 401 / 403"]
+    ROLE -->|"yes"| OK
+
+    classDef priv fill:#F0F6FF,stroke:#3B82F6,color:#1E3A8A;
+    class B,Q priv;
+```
+
+**Privacy controls on this path:**
+
+- **httpOnly + `secure` + `sameSite=lax` cookie** — the session token is never
+  readable by JavaScript (XSS can't exfiltrate it) and isn't sent on cross-site
+  navigations (baseline CSRF defense).
+- **Edge does no DB work and can't read the role** — it only checks cookie
+  *presence*, so a forged/expired cookie still fails the real check server-side.
+- **Server is the only authority** — `requireUser(role?)` re-reads the session
+  from Aurora and re-checks `role` + account `status` on *every* request; the
+  client's claimed identity is never trusted.
+- **Data at rest is hashed, not stored raw** — passwords (scrypt + per-user salt)
+  and verify/reset tokens (SHA-256) are one-way; a DB leak yields nothing
+  replayable (see §4).
+- **Least-authority handlers** — once authenticated, queries are scoped to the
+  resolved `user_id`, so one user can't read another's rows.
+
+### Credential & token lifecycle (privacy at rest)
+
+Secrets that touch the database are **transformed before storage** — the raw
+value lives only transiently (in the user's head, or in a one-time email link).
+
+```mermaid
+sequenceDiagram
+    participant U as User
+    participant API as Serverless route
+    participant DB as Aurora
+    participant M as Resend (email)
+
+    Note over U,DB: Sign-up — password never stored in clear
+    U->>API: email + password (TLS)
+    API->>API: scrypt(password, per-user salt)
+    API->>DB: store password_hash + salt (raw discarded)
+    API->>API: issue verify token (32B random)
+    API->>DB: store SHA-256(token) only
+    API->>M: email link with RAW token
+    M-->>U: "verify your email" link
+
+    Note over U,DB: Verify / reset — single-use, hashed lookup
+    U->>API: click link (raw token)
+    API->>DB: lookup by SHA-256(token), check expiry + used_at
+    API->>DB: consume atomically (UPDATE ... WHERE used_at IS NULL)
+    Note over API,DB: reset also DELETEs all sessions (logs out attacker)
+```
+
 ---
 
 ## 2. Unified login (no portal toggle)

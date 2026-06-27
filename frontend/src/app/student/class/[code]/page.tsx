@@ -1738,6 +1738,11 @@ export default function StudentClassPage({ params }: { params: Promise<{ code: s
         }
       } catch (err) {
         console.warn("[StudentClassPage] Background auto-refresh failed:", err);
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("Course not found") || msg.includes("Not enrolled")) {
+          setLoadError(msg);
+          setCourseData(null);
+        }
       }
     }, 5000);
 

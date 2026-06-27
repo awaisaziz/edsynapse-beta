@@ -35,15 +35,7 @@ export function Navbar({ variant = "glass" }: NavbarProps) {
               fill
               sizes="32px"
               priority
-              className="object-contain dark:hidden"
-            />
-            <Image
-              src="/logo-dark.png"
-              alt="EdSynapse Logo"
-              fill
-              sizes="32px"
-              priority
-              className="hidden object-contain dark:block"
+              className="object-contain"
             />
           </div>
           <span className="text-base font-bold tracking-tight text-foreground font-display">

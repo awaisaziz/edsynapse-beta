@@ -55,7 +55,7 @@ flowchart TB
     end
 
     subgraph ext["External Services"]
-        OPENAI["External — OpenAI API (gpt-5-mini chat + text-embedding-3-small)"]
+        OPENAI["External — OpenAI API (gpt-4o-mini chat + text-embedding-3-small)"]
         RESEND["External — Resend API (verification + password-reset email)"]
         GFORM["External — Google Forms (beta feedback)"]
     end
@@ -142,7 +142,7 @@ one vector workload (content RAG); everything else is plain relational state.
 | **Conversation history** | Recent turns for this student + course + topic (last 8 sent to the model, last 20 persisted) | `tutor_sessions.messages` (JSONB) | Across sessions on that topic |
 | **Durable tutor memory** | A rolling 3-sentence summary + ≤8 stable facts about the learner (what they grasp, struggle with, goals) — survives a chat "reset" | `tutor_sessions.memory` (JSONB) | Durable per student+course+topic; refreshed by an LLM consolidation pass after each turn |
 | **Strengths & Gaps** | Mastery per topic — `strong` / `moderate` / `needs_improvement` + evidence | `knowledge_states` (unique per student+course+topic) | Durable; updated by grading |
-| **Learning preferences** | Modality (text / visual / audio) + pace (methodical / deep) | Client UI state, sent per request | Per session (not persisted) |
+| **Learning preferences** | Modality (`visual` / `text` / `audio` / `all`) + pace (`deep` / `methodical` / `regular`) | Set at onboarding (`users.learning_modality` / `learning_pace`), applied per request | Durable on the profile |
 
 ```mermaid
 flowchart TB
@@ -262,12 +262,12 @@ The fifth tab lists every uploaded source for the course (grouped by lesson) and
 | Next.js App Router | **Vercel** | UI, routing, role-protected pages | ✅ Live |
 | Edge Middleware | **Vercel** | Cookie-presence route gate (no DB at the edge) | ✅ Live |
 | Serverless Functions (Node.js) | **Vercel** | `/api/*` route handlers — CRUD, RAG ingest, quiz/assessment gen, grading, **and** the SSE tutor stream | ✅ Live |
-| Env vars + OIDC | **Vercel** | `AWS_REGION`, `PGHOST`, `PGUSER`, `PGDATABASE`, `AWS_ROLE_ARN`, `VERCEL_OIDC_TOKEN`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `CRON_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM`, `NEXT_PUBLIC_APP_URL` | ✅ Live |
+| Env vars + OIDC | **Vercel** | `AWS_REGION`, `PGHOST`, `PGUSER`, `PGDATABASE`, `AWS_ROLE_ARN`, `VERCEL_OIDC_TOKEN`, `OPENAI_API_KEY`, `OPENAI_MODEL`, `CRON_SECRET`, `RESEND_API_KEY`, `EMAIL_FROM`, `NEXT_PUBLIC_APP_URL`, `NEXT_PUBLIC_FEEDBACK_URL` (optional) | ✅ Live |
 | Aurora PostgreSQL 17 (Serverless v2) | **AWS** | Relational data + vector store, reached via IAM/OIDC auth | ✅ Live |
 | pgvector 0.8 | **AWS** | Cosine similarity search over `source_chunks` (content RAG) | ✅ Live |
-| OpenAI API | **External** | `gpt-5-mini` chat (override via `OPENAI_MODEL`), `text-embedding-3-small` embeddings | ✅ Live |
+| OpenAI API | **External** | `gpt-4o-mini` chat (override via `OPENAI_MODEL`), `text-embedding-3-small` embeddings | ✅ Live |
 | Resend API | **External** | Transactional email — account verification + password-reset links (`src/lib/email.ts`). No-ops gracefully when `RESEND_API_KEY` is unset | 🔌 Wired (API key pending) |
-| Google Forms | **External** | Beta feedback capture — linked from the landing nav and the student/teacher app shell (`NEXT_PUBLIC_FEEDBACK_URL`) | 🔌 Wired (form URL pending) |
+| Google Forms | **External** | Beta feedback capture — linked from the landing nav and the student/teacher app shell. `src/lib/feedback.ts` ships the published form as the default `FEEDBACK_URL`; `NEXT_PUBLIC_FEEDBACK_URL` overrides it | ✅ Live |
 
 > File parsing (`unpdf`/`mammoth`/`xlsx`) runs in the serverless function; there
 > is no S3 bucket — extracted text lives in `sources.content`, vectors in
@@ -314,14 +314,22 @@ The fifth tab lists every uploaded source for the course (grouped by lesson) and
     oversight, and a support inbox of admin ↔ user threads (`support_threads` /
     `support_messages`).
 7. **Feedback (beta).** A **Feedback** link in the landing nav and a **Share
-   Feedback** link in the student/teacher app shell open a Google Form in a new
-   tab (`NEXT_PUBLIC_FEEDBACK_URL`, `src/lib/feedback.ts`) so beta users — both
-   learners and teachers — can shape the v1 launch. No data flows back into the
-   app; responses collect in Google Forms.
+   Feedback** link in the student/teacher app shell open the published Google Form
+   in a new tab. `src/lib/feedback.ts` ships the live form as the default
+   `FEEDBACK_URL` (overridable via `NEXT_PUBLIC_FEEDBACK_URL`). The form branches
+   by role — students and teachers answer their own sections — and is anonymous
+   (optional email only). No data flows back into the app; responses collect in
+   Google Forms.
 
-See [`../frontend/scripts/001-init-schema.sql`](../frontend/scripts/001-init-schema.sql)
-and [`002-admin-support.sql`](../frontend/scripts/002-admin-support.sql) for the
-data model, and [`../PRD.md`](../PRD.md) for the full product spec.
+The data model is built by the numbered, idempotent migrations in
+[`../frontend/scripts/`](../frontend/scripts) (`001-init-schema.sql` →
+`013-auth-email.sql`), applied in order by `npm run db:setup`. Beyond the core +
+admin/support tables, later migrations add `study_materials` (grounded notes /
+flashcards, `005`), the `tutor_sessions.memory` durable-memory column (`008`),
+conversation-thread titles (`010`), the Q&A board (`discussions` /
+`discussion_posts`, `012`), and the auth-email tables (`auth_tokens` /
+`login_attempts` + `users.email_verified`, `013` — see [`auth.md`](auth.md)). See
+[`../PRD.md`](../PRD.md) for the full product spec.
 
 ---
 

@@ -358,6 +358,7 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
 
   // Periodic background polling for teacher course view (every 5 seconds)
   useEffect(() => {
+    if (notFound) return;
     const interval = setInterval(async () => {
       try {
         if (!busyLesson && !removeStudentBusy && !recordLoading && !reviewLoading) {
@@ -379,11 +380,15 @@ export default function TeacherCoursePage({ params }: { params: Promise<{ id: st
         }
       } catch (err) {
         console.warn("[TeacherCoursePage] Background auto-refresh failed:", err);
+        const msg = err instanceof Error ? err.message : String(err);
+        if (msg.includes("Course not found") || msg.includes("access")) {
+          setNotFound(true);
+        }
       }
     }, 5000);
 
     return () => clearInterval(interval);
-  }, [id, activeTab, busyLesson, removeStudentBusy, recordLoading, reviewLoading]);
+  }, [id, activeTab, busyLesson, removeStudentBusy, recordLoading, reviewLoading, notFound]);
 
   // Load analytics when the Students tab is first opened
   useEffect(() => {

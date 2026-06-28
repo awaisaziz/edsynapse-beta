@@ -368,6 +368,33 @@ export default function LandingPage() {
         </div>
       </section>
 
+      {/* ── YOUTUBE VIDEO SHOWCASE ───────────────────────────── */}
+      <section className="relative z-10 bg-[#f5f5f7] px-6 pb-20 pt-10">
+        <ScrollReveal direction="up" duration={800}>
+          <div className="mx-auto max-w-4xl">
+            <div className="text-center mb-10">
+              <h2 className="text-[clamp(2rem,4vw,3rem)] font-bold tracking-[-0.03em]">
+                See EdSynapse in Action
+              </h2>
+              <p className="mt-4 text-[16px] text-[#5a6478]">
+                Watch a quick walkthrough of how EdSynapse transforms study material into a personalized learning loop.
+              </p>
+            </div>
+            <div className="relative overflow-hidden rounded-[32px] border border-white/80 bg-white/40 p-4 shadow-[0_20px_50px_rgba(29,29,31,0.05)] backdrop-blur-2xl">
+              <div className="aspect-video w-full overflow-hidden rounded-[22px] bg-black shadow-inner">
+                <iframe
+                  className="h-full w-full border-0"
+                  src="https://www.youtube.com/embed/r44k8OVSxTM"
+                  title="EdSynapse Walkthrough"
+                  allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+                  allowFullScreen
+                ></iframe>
+              </div>
+            </div>
+          </div>
+        </ScrollReveal>
+      </section>
+
       {/* ── FOOTER CTA ───────────────────────────────────────── */}
       <section className="relative z-10 bg-[#f5f5f7] py-40 text-center">
         <ScrollReveal direction="up" duration={800}>

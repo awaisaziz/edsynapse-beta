@@ -469,41 +469,6 @@ export const studentApi = {
     del<{ ok: boolean }>(
       `/student/conversations?course_id=${encodeURIComponent(courseId)}&topic=${encodeURIComponent(topic)}`,
     ),
-
-  // ── Socratic discussion bot (course-wide, re-ranked RAG, persisted) ──────────
-  async *discussionStreamFetch(
-    courseId: string,
-    courseName: string,
-    message: string,
-    signal?: AbortSignal,
-    topicKey?: string,
-  ): AsyncGenerator<{ type: string; [k: string]: unknown }> {
-    const res = await fetch(`${BASE}/api/student/discussion/stream`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ course_id: courseId, course_name: courseName, message, topic_key: topicKey }),
-      credentials: "include",
-      signal,
-    });
-    if (!res.ok) throw new Error(`Discussion stream failed: ${res.status}`);
-    const reader = res.body!.getReader();
-    const decoder = new TextDecoder();
-    let buf = "";
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buf += decoder.decode(value, { stream: true });
-      const lines = buf.split("\n");
-      buf = lines.pop() ?? "";
-      for (const line of lines) {
-        if (line.startsWith("data: ")) {
-          try {
-            yield JSON.parse(line.slice(6));
-          } catch {}
-        }
-      }
-    }
-  },
 };
 
 // ── Teacher API ───────────────────────────────────────────────────────────────

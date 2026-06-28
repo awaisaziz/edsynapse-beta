@@ -115,10 +115,11 @@ export async function retrieve(params: {
 /**
  * Retrieve with a lightweight LLM re-ranker. Pulls a larger candidate set by
  * cosine similarity, then asks the model to score each candidate's relevance to
- * the query and returns the top-k reordered. This is the "cross-encoder style"
- * second stage the discussion bot uses to ground its Socratic questions more
- * precisely than raw cosine order. Falls back to plain cosine order on any
- * failure or when there is no material.
+ * the query and returns the top-k reordered. This "cross-encoder style" second
+ * stage is used system-wide via groundedContext() to improve grounding precision
+ * for the tutor, Socratic tutor, quiz/assessment generation, flashcards, notes,
+ * and the discussion bot. Falls back to plain cosine order on any failure or
+ * when there is no material.
  */
 export async function retrieveReranked(params: {
   courseId: string;

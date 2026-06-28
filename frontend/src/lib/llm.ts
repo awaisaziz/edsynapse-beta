@@ -1,5 +1,5 @@
 import { getChatClient, CHAT_MODEL } from "@/lib/openai";
-import { retrieve, retrieveReranked, buildContext, type RetrievedChunk } from "@/lib/rag";
+import { retrieveReranked, buildContext, type RetrievedChunk } from "@/lib/rag";
 
 /** Durable, per learner+topic memory the tutor carries across chat resets. */
 export type TutorMemory = { summary: string; facts: string[] };
@@ -122,25 +122,14 @@ function repairTruncatedJSON(raw: string): string | null {
   }
 }
 
-/** Retrieve grounding context for a course + query. */
+/** Retrieve grounding context for a course + query, using LLM re-ranking for precision. */
 export async function groundedContext(courseId: string | null, queryText: string) {
-  if (!courseId) return { context: "", sources: [] as { title: string; text: string }[], chunks: [] as RetrievedChunk[] };
-  const chunks = await retrieve({ courseId, queryText });
-  const { context, sources } = buildContext(chunks);
-  return { context, sources, chunks };
-}
-
-/**
- * Retrieve grounding context using the LLM re-ranker — used by the Socratic
- * discussion bot, which scopes its questions tightly to the most relevant
- * course material.
- */
-export async function rerankedContext(courseId: string | null, queryText: string) {
   if (!courseId) return { context: "", sources: [] as { title: string; text: string }[], chunks: [] as RetrievedChunk[] };
   const chunks = await retrieveReranked({ courseId, queryText });
   const { context, sources } = buildContext(chunks);
   return { context, sources, chunks };
 }
+
 
 export { GROUNDING_RULE };
 
@@ -235,52 +224,7 @@ export async function* streamSocraticReply(params: {
   }
 }
 
-/**
- * Stream a Socratic discussion reply. Unlike the tutor (which teaches a single
- * topic), the discussion bot probes the learner's *overall* understanding of an
- * entire course, scoped to its material. Its output is Socratic: it leads with
- * questions rather than lectures, builds on the learner's answers, and surfaces
- * gaps — always staying within the bounds of the provided course material.
- */
-export async function* streamDiscussionReply(params: {
-  courseName: string;
-  message: string;
-  context: string;
-  history: { role: "user" | "assistant"; content: string }[];
-}): AsyncGenerator<string> {
-  const system = [
-    `You are EdSynapse's Socratic discussion partner for the course "${params.courseName}".`,
-    `Your goal is to assess and deepen the learner's OVERALL understanding of this course's material through dialogue.`,
-    `Stay strictly within the scope of the course material below — do not drift to topics the course does not cover.`,
-    GROUNDING_RULE,
-    `Be genuinely Socratic: lead with one focused question at a time, build on the learner's previous answer, gently probe assumptions, and ask "why" / "how" / "what if". Do NOT lecture or hand over full explanations; draw the reasoning out of the learner.`,
-    `Vary how you phrase your questions — be genuinely creative and avoid formulaic openers. Do NOT repeatedly start with "What do you think". Mix it up across turns: pose a concrete scenario or edge case ("Imagine you...", "Suppose..."), challenge directly ("How would you defend...", "What breaks if..."), invite prediction, ask for a counterexample, request an analogy, or have them critique a deliberately flawed claim. Let the question's form fit the idea, and keep the phrasing fresh from one turn to the next.`,
-    `When the learner answers, briefly acknowledge what was correct, surface any gap or misconception with another question, then advance to the next idea. Keep each turn short (2-4 sentences) and end with a question.`,
-    `If the learner is clearly stuck, offer a small hint, then re-ask a simpler question.`,
-    `Format replies in Markdown. Write all mathematical notation in LaTeX delimited ONLY with dollar signs ($...$ inline, $$...$$ display). Never use \\( \\) or \\[ \\]. Use \\{ and \\} for set braces.`,
-    params.context
-      ? `\n\nCOURSE MATERIAL (the only scope for this discussion):\n${params.context}`
-      : `\n\n(No specific source material is available for this course; keep the discussion to general fundamentals and ask the learner what they want to explore.)`,
-  ]
-    .filter(Boolean)
-    .join("\n");
 
-  const stream = await getChatClient().chat.completions.create({
-    model: CHAT_MODEL,
-    stream: true,
-    temperature: 0.8,
-    messages: [
-      { role: "system", content: system },
-      ...params.history.slice(-10),
-      { role: "user", content: params.message },
-    ],
-  });
-
-  for await (const part of stream) {
-    const delta = part.choices[0]?.delta?.content;
-    if (delta) yield delta;
-  }
-}
 
 /** Render the tutor's long-term memory as a system-prompt block. */
 function memoryBlock(memory?: TutorMemory): string {
